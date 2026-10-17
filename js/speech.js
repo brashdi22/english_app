@@ -119,7 +119,11 @@ export function releaseMicrophone() {
 
 // Listens once with the chosen recognizer. `expected` lists the words or
 // sentences the child should say; the offline recognizer listens for those.
-export function listen({ settings = {}, expected = [], mode = 'word', ...opts } = {}) {
+// `openAnswer`: the child answers in their own words (talk tasks). There are
+// no expected words to give the offline recognizer, and the browser's one is
+// better at free speech, so it is used whenever the browser has it.
+export function listen({ settings = {}, expected = [], mode = 'word', openAnswer = false, ...opts } = {}) {
+  if (openAnswer && Recognition) return browserListen({ lang: settings.accent, ...opts });
   if (engine(settings) === 'offline') {
     return offline.listen({ expected, mode, ...opts }).catch((err) => {
       // A device that can't run the offline recognizer falls back once.

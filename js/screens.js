@@ -755,7 +755,7 @@ export function askScreen(root, act, env) {
         mic.classList.add('starting');
         heard.textContent = 'Wait…';
         try {
-          const { alternatives } = await env.listen({ mode: 'sentence', timeoutMs: 9000, onReady: () => micReady(mic, heard, 'Answer now!') });
+          const { alternatives } = await env.listen({ openAnswer: true, mode: 'sentence', timeoutMs: 9000, onReady: () => micReady(mic, heard, 'Answer now!') });
           answers[i] = { text: alternatives[0], points: suggest(alternatives[0]) };
           save();
           draw();

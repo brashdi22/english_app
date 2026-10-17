@@ -416,3 +416,62 @@ td { cursor: pointer; }
 .offline-banner .bar { margin-top: 0.4rem; }
 .settings label.check { flex-wrap: nowrap; align-items: flex-start; }
 .settings label.check input { flex: none; margin-top: 0.2rem; }
+
+/* ------------------------------------------------------ family accounts */
+.card.center { text-align: center; }
+.card.narrow { max-width: 420px; margin-left: auto; margin-right: auto; }
+.tabs { display: flex; gap: 0.4rem; margin-bottom: 0.5rem; }
+.tab { flex: 1; border: 2px solid var(--line); background: #fff; border-radius: 12px; padding: 0.6rem; font-weight: 700; cursor: pointer; }
+.tab.on { border-color: var(--primary); background: #eaf1ff; }
+.auth-form { display: flex; flex-direction: column; gap: 0.4rem; align-items: stretch; }
+.auth-form .btn { align-self: flex-start; }
+.form-status { min-height: 1.2em; color: var(--bad); font-weight: 600; }
+.me-btn { display: inline-flex; align-items: center; gap: 0.2rem; padding: 0 0.4rem; }
+.avatar-mini { width: 28px; height: 28px; object-fit: contain; }
+
+.pin-modal { max-width: 340px; text-align: center; }
+.pin-box { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; }
+.pin-box h2 { margin: 0; }
+.pin-msg { margin: 0; font-weight: 600; }
+.pin-dots { display: flex; gap: 0.7rem; margin: 0.3rem 0 0.6rem; }
+.pin-dot { width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--primary); }
+.pin-dot.on { background: var(--primary); }
+.pin-keys { display: grid; grid-template-columns: repeat(3, 72px); gap: 0.5rem; }
+.pin-key { height: 64px; border-radius: 16px; border: 2px solid var(--line); background: #fff; font-size: 1.6rem; font-weight: 800; cursor: pointer; }
+.pin-key:active { background: var(--selected); }
+.pin-key:nth-child(10) { grid-column: 1; }
+.shake { animation: shake 0.4s; }
+@keyframes shake { 20%, 60% { transform: translateX(-8px); } 40%, 80% { transform: translateX(8px); } }
+.pin-input { max-width: 12ch; letter-spacing: 0.3em; font-size: 1.3rem; }
+
+.child-cards { display: grid; gap: 0.8rem; }
+.child-card { border: 2px solid var(--line); border-radius: 14px; padding: 0.8rem; }
+.child-head { display: flex; align-items: center; gap: 0.7rem; }
+.child-head h3, .child-head h2 { margin: 0; }
+.child-head p { margin: 0.1rem 0 0; }
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 0.5rem; margin: 0.6rem 0; }
+.stat { background: #f4f8ff; border-radius: 12px; padding: 0.4rem 0.6rem; display: flex; flex-direction: column; }
+.stat-icon { font-size: 1.2rem; }
+
+.score-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0 1rem; }
+.podium { display: flex; justify-content: center; align-items: flex-end; gap: 0.6rem; margin: 1rem 0; }
+.podium-place { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; width: 110px; text-align: center; }
+.podium-place.me strong { color: var(--primary); }
+.medal { font-size: 2rem; }
+.podium-block { width: 100%; border-radius: 10px 10px 0 0; background: linear-gradient(#ffe08a, #ffc94a); font-size: 1.6rem; font-weight: 900; color: #8a5a00; display: grid; place-items: center; }
+.place-1 .podium-block { height: 90px; }
+.place-2 .podium-block { height: 64px; background: linear-gradient(#e6ebf2, #c9d3e0); color: #4a5568; }
+.place-3 .podium-block { height: 44px; background: linear-gradient(#f2d1b3, #d9a77a); color: #7a4a20; }
+.scoreboard tr.me td { background: #eaf1ff; font-weight: 700; }
+.scoreboard td.lead { font-weight: 800; }
+.name-cell { display: inline-flex; align-items: center; gap: 0.3rem; white-space: nowrap; }
+.name-cell .avatar { width: 32px; height: 32px; }
+.scoreboard { min-width: 600px; }
+.scoreboard td, .scoreboard th { white-space: nowrap; }
+@media (max-width: 640px) {
+  .topbar { gap: 0.25rem; padding-left: 0.5rem; padding-right: 0.5rem; }
+  .icon-btn { min-width: 38px; height: 38px; font-size: 1.05rem; }
+  .save-status { font-size: 0; padding: 0.15rem 0.35rem; }
+  .save-status::first-letter { font-size: 0.8rem; }
+  .me-btn .avatar-mini { width: 22px; height: 22px; }
+}

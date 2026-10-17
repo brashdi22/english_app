@@ -69,3 +69,12 @@ test('the time limit starts when the microphone is ready, not at the tap', async
   assert.equal(stopped, true);
   assert.equal((await outcome).code, 'no-speech');
 });
+
+test('open talk answers use the browser recognizer even when offline listening is chosen', async () => {
+  current = null;
+  const p = listen({ settings: { listenEngine: 'offline' }, openAnswer: true });
+  await tick();
+  assert.ok(current?.started, "the browser's recognizer was started");
+  current.onresult(event([result(['my name is ali'], true)]));
+  assert.deepEqual((await p).alternatives, ['my name is ali']);
+});

@@ -2,10 +2,13 @@ import { BOOK } from './content/index.js';
 import { createStore, flushOnExit } from './storage.js';
 import * as speech from './speech.js';
 import { starsForResult } from './scoring.js';
-import { h, add, clear, img, stars, rich, toast, confetti, formatTime } from './ui.js';
+import { h, add, clear, img, stars, rich, toast, confetti } from './ui.js';
 import { runActivity, isRunnerType } from './runner.js';
 import { SCREENS, renderBlocks } from './screens.js';
 import { activityPoints } from './points.js';
+import * as P from './progress.js';
+import { createFamily } from './family.js';
+import { familyPages } from './family-pages.js';
 
 const MODEL_MB = 40;
 const AVATARS = ['sam', 'lina', 'ben', 'dina', 'max', 'mrs-green', 'mr-hill', 'ms-rose', 'gran-mona'];
@@ -22,6 +25,7 @@ const unitActivities = (unit) => unit.sections.flatMap((s) => s.activities);
 
 // ------------------------------------------------------------------- state
 const saveEl = h('span', { class: 'save-status', role: 'status', 'aria-live': 'polite' });
+let family = null;
 const store = createStore({
   onStatus: (s) => {
     if (s.pending) {
@@ -37,8 +41,12 @@ const store = createStore({
       toast('Progress could not be saved on this device. Check that storage is allowed.', 'bad');
     }
   },
+  onChange: (evt) => family?.handleChange(evt),
 });
 flushOnExit(store);
+
+family = createFamily(store, { onUpdate: () => liveUpdate() });
+addEventListener('pagehide', () => family.flush());
 
 let adultMode = false;
 
@@ -123,34 +131,41 @@ function nextActivity(id) {
 }
 
 // --------------------------------------------------------- grown-up gate
+// Grown-up mode (giving points, the parent area) needs the parent password.
+// It stays on until the grown-up turns it off or the app is closed.
+function setAdult(on) {
+  adultMode = on;
+}
+
 function unlockAdult() {
   if (adultMode) return Promise.resolve(true);
   return new Promise((resolve) => {
-    const a = 6 + Math.floor(Math.random() * 7);
-    const b = 5 + Math.floor(Math.random() * 7);
-    const input = h('input', { type: 'number', inputmode: 'numeric', class: 'write-input', 'aria-label': 'Answer' });
+    const input = h('input', { type: 'password', class: 'write-input', autocomplete: 'current-password', 'aria-label': 'Parent password', placeholder: 'Parent password' });
+    const status = h('p', { class: 'form-status', role: 'status' });
+    let ok = false;
     const dialog = h('dialog', { class: 'modal' },
       h('h2', {}, '👪 Grown-ups only'),
-      h('p', {}, `To give points and see answers, please answer: what is ${a} × ${b}?`),
-      input,
+      h('p', {}, 'To give points and see the answer notes, please enter the parent password.'),
+      h('form', {
+        onsubmit: async (e) => {
+          e.preventDefault();
+          if (await family.checkParent(input.value)) {
+            ok = true;
+            adultMode = true;
+            dialog.close();
+            renderHeader();
+            toast('Grown-up mode is on.', 'good');
+          } else {
+            input.value = '';
+            status.textContent = 'That password is not right.';
+            input.focus();
+          }
+        },
+      }, input, status,
       h('div', { class: 'controls' },
-        h('button', { type: 'button', class: 'btn ghost', onclick: () => { dialog.close(); resolve(false); } }, 'Cancel'),
-        h('button', {
-          type: 'button', class: 'btn primary',
-          onclick: () => {
-            if (Number(input.value) === a * b) {
-              adultMode = true;
-              dialog.close();
-              renderHeader();
-              toast('Grown-up mode is on for this visit.', 'good');
-              resolve(true);
-            } else {
-              input.value = '';
-              toast('Not quite. Try again.', 'bad');
-            }
-          },
-        }, 'OK')));
-    dialog.addEventListener('close', () => dialog.remove());
+        h('button', { type: 'button', class: 'btn ghost', onclick: () => dialog.close() }, 'Cancel'),
+        h('button', { type: 'submit', class: 'btn primary' }, 'OK'))));
+    dialog.addEventListener('close', () => { dialog.remove(); resolve(ok); });
     add(document.body, dialog);
     dialog.showModal();
     input.focus();
@@ -162,6 +177,13 @@ const app = document.getElementById('app');
 const header = h('header', { class: 'topbar' });
 const main = h('main', { id: 'main', tabindex: '-1' });
 add(app, header, main);
+
+const STORY_ACTS = [...ACTS.values()].filter(({ act }) => act.type === 'story' && act.record);
+const pages = familyPages({
+  store, family, main, go, renderHeader, AVATARS, fmt, STORY_ACTS, speak,
+  isAdult: () => adultMode,
+  setAdult,
+});
 
 function go(hash) {
   if (location.hash === hash) route();
@@ -178,14 +200,21 @@ function renderHeader(title) {
   clear(header);
   const p = store.profile();
   const atHome = !location.hash || location.hash === '#/' || location.hash === '#';
-  add(header, 
+  const ready = family.ready && family.signedIn();
+  add(header,
     atHome ? h('span', { class: 'brand' }, '📗') : h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Back', onclick: () => backFromHere() }, '⬅'),
     h('h1', { class: 'top-title' }, title || BOOK.title),
-    saveEl,
+    p ? saveEl : null,
     p ? h('span', { class: 'star-count', title: 'My stars' }, `⭐ ${totalStars()}`) : null,
     adultMode ? h('button', { type: 'button', class: 'icon-btn adult-on', title: 'Grown-up mode on (tap to turn off)', onclick: () => { adultMode = false; route(); } }, '👪') : null,
+    ready ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Scoreboard', title: 'Scoreboard', onclick: () => go('#/scoreboard') }, '🏆') : null,
     p ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'My progress', onclick: () => go('#/progress') }, '📊') : null,
     p ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Settings', onclick: () => go('#/settings') }, '⚙️') : null,
+    p ? h('button', {
+      type: 'button', class: 'icon-btn me-btn', title: `${p.name}: log out`, 'aria-label': `Log out ${p.name}`,
+      onclick: () => { if (confirm(`Log out, ${p.name}?`)) { family.logout(); adultMode = false; go('#/'); } },
+    }, img(p.avatar, { cls: 'avatar-mini' }), '🚪') : null,
+    !p && ready && !adultMode ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Parent area', title: 'Parent area', onclick: () => go('#/parent') }, '👪') : null,
   );
 }
 
@@ -193,6 +222,7 @@ function backFromHere() {
   env.stop();
   const [, page, id] = location.hash.split('/');
   if (page === 'act' && ACTS.get(id)) go(`#/unit/${ACTS.get(id).unit.id}`);
+  else if (page === 'parent' && id) go('#/parent');
   else go('#/');
 }
 
@@ -200,51 +230,49 @@ function backFromHere() {
 function route() {
   env.stop();
   speech.releaseMicrophone();
-  const [, page, id] = (location.hash || '#/').split('/');
+  const [, page, id, sub] = (location.hash || '#/').split('/');
   clear(main);
-  if (!store.profile() && page !== 'profiles') return profilesPage();
+  shownPage = page || 'home';
+  if (!family.ready) { shownPage = 'loading'; return pages.loadingPage(); }
+  if (!family.signedIn()) { shownPage = 'signin'; return pages.signInPage(); }
+  if (page === 'parent' && id === 'child') { shownPage = 'childprogress'; return pages.childProgressPage(sub); }
+  if (page === 'parent') return pages.parentPage();
+  if (page === 'scoreboard') return pages.scoreboardPage();
+  if (!store.profile()) { shownPage = 'picker'; return pages.pickerPage(); }
   switch (page) {
     case 'unit': return unitPage(id);
     case 'act': return activityPage(id);
     case 'progress': return progressPage();
     case 'settings': return settingsPage();
-    case 'profiles': return profilesPage();
     case 'certificate': return certificatePage();
     default: return homePage();
   }
 }
 addEventListener('hashchange', route);
 
+// Something changed (signed in, or progress arrived from another device):
+// redraw pages that only show information. Pages where the child is working,
+// or where a grown-up is typing, are left alone.
+let shownPage = null;
+let liveTimer = null;
+const LIVE_PAGES = new Set(['loading', 'signin', 'picker', 'home', 'scoreboard', 'progress', 'childprogress']);
+function liveUpdate() {
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(() => {
+    const wasWaiting = shownPage === 'loading' || shownPage === 'signin';
+    const nowWaiting = !family.ready || !family.signedIn();
+    if (wasWaiting !== nowWaiting) return route();
+    if (!LIVE_PAGES.has(shownPage) || document.querySelector('dialog[open]')) return;
+    if (main.contains(document.activeElement) && document.activeElement.matches('input, textarea, select')) return;
+    route();
+  }, 250);
+}
+
 // ------------------------------------------------------------------- pages
-function unitProgress(unit) {
-  const acts = unitActivities(unit);
-  const done = acts.filter((a) => store.activityProgress(a.id)?.completed).length;
-  return { done, total: acts.length };
-}
-
-function reviewScore(unit, filter = (a) => a.review) {
-  const acts = unitActivities(unit).filter(filter);
-  if (!acts.length) return null;
-  let earned = 0;
-  let possible = 0;
-  let finished = 0;
-  for (const a of acts) {
-    const rec = store.activityProgress(a.id);
-    possible += activityPoints(a);
-    if (rec?.completed) {
-      earned += rec.earned || 0;
-      finished++;
-    }
-  }
-  return { earned, possible, finished, count: acts.length };
-}
-
-function bandFor(unit, score) {
-  const bands = unit.review?.bands;
-  if (!bands) return { stars: starsForResult(score.earned, score.possible), text: '' };
-  const i = bands.findIndex(([min]) => score.earned >= min);
-  return { stars: Math.max(1, 3 - i), text: bands[i][1] };
-}
+const myProgress = () => store.profile()?.progress || {};
+const unitProgress = (unit) => P.unitProgress(unit, myProgress());
+const reviewScore = (unit, filter) => P.reviewScore(unit, myProgress(), filter);
+const { bandFor } = P;
 
 function homePage() {
   renderHeader();
@@ -387,7 +415,8 @@ function activityPage(id) {
   const body = h('div', { class: 'act-body' });
   add(wrap, body);
   add(main, wrap);
-  if (['words', 'speak', 'story', 'dialogue', 'ask'].includes(act.type)) {
+  const usesOffline = ['words', 'speak', 'story', 'dialogue'].includes(act.type) || (act.type === 'ask' && !speech.canListenOnline);
+  if (usesOffline) {
     speech.prepareMicrophone(store.settings());
     if (speech.engine(store.settings()) === 'offline') wrap.insertBefore(offlineBanner(), body);
   }
@@ -400,79 +429,12 @@ function activityPage(id) {
 function progressPage() {
   renderHeader('My Progress');
   const p = store.profile();
-  add(main, h('h2', { class: 'section-title' }, `📊 ${p.name}'s Progress Tracker`));
-  const table = h('table', { class: 'tracker' }, h('thead', {}, h('tr', {}, ['Week', 'My work', 'Done', 'Score', 'Stars'].map((t) => h('th', {}, t)))));
-  const body = h('tbody');
-  for (const unit of UNITS) {
-    const { done, total } = unitProgress(unit);
-    const score = reviewScore(unit);
-    const finished = score && score.finished === score.count;
-    add(body, h('tr', { onclick: () => go(`#/unit/${unit.id}`) },
-      h('td', {}, unit.week ? String(unit.week) : ''),
-      h('td', {}, `${unit.label}${unit.kind === 'chapter' ? `: ${unit.title}` : ''}`),
-      h('td', {}, `${done} / ${total}`),
-      h('td', {}, score ? `${fmt(score.earned)} / ${score.possible}` : '—'),
-      h('td', {}, finished ? stars(bandFor(unit, score).stars) : '')));
-  }
-  add(table, body);
-  add(main, h('div', { class: 'table-wrap' }, table));
-
-  // Reading records
-  const stories = [...ACTS.values()].filter(({ act }) => act.type === 'story' && act.record);
-  const rt = h('table', { class: 'tracker' }, h('thead', {}, h('tr', {}, ['Story', 'Words', 'My time', 'Mistakes', 'Times read'].map((t) => h('th', {}, t)))));
-  const rb = h('tbody');
-  for (const { act } of stories) {
-    const records = store.activityProgress(act.id)?.data?.keep?.records || [];
-    const lastRec = records[records.length - 1];
-    add(rb, h('tr', { onclick: () => go(`#/act/${act.id}`) },
-      h('td', {}, act.storyTitle),
-      h('td', {}, String(act.words || '')),
-      h('td', {}, lastRec ? formatTime(lastRec.seconds) : ''),
-      h('td', {}, lastRec ? String(lastRec.mistakes) : ''),
-      h('td', {}, String(records.length || ''))));
-  }
-  add(rt, rb);
-  add(main, h('h2', { class: 'section-title' }, '📒 My reading records'),
-    h('p', { class: 'muted' }, 'The stories get longer, but you get faster!'),
-    h('div', { class: 'table-wrap' }, rt));
-
-  // Not yet items from Progress Checks
-  const notYet = [];
-  for (const { act, unit } of ACTS.values()) {
-    if (act.type !== 'check') continue;
-    const marks = store.activityProgress(act.id)?.data?.marks || {};
-    act.items.forEach((t, i) => { if (marks[i] && marks[i] !== 'yes') notYet.push({ unit, text: t, mark: marks[i] }); });
-  }
-  if (notYet.length) {
-    add(main, h('h2', { class: 'section-title' }, '🤔 Things to practise more'),
-      h('ul', { class: 'say-list' }, notYet.map((n) => h('li', {}, `${n.unit.label}: I can ${n.text} — `, h('em', {}, n.mark === 'almost' ? 'Almost' : 'Not yet')))));
-  }
-  const lb = UNITS.find((u) => u.id === 'begin');
-  if (lb?.placement) add(main, placementBox(lb));
-}
-
-function placementBox(unit) {
-  const part = (key) => {
-    const acts = unitActivities(unit).filter((a) => a.part === key);
-    const rec = acts.map((a) => store.activityProgress(a.id));
-    if (!rec.every((r) => r?.completed)) return null;
-    return rec.reduce((s, r) => s + (r.earned || 0), 0);
-  };
-  const scores = Object.fromEntries(['A', 'B', 'C', 'D', 'E', 'F'].map((k) => [k, part(k)]));
-  const box = h('section', { class: 'review-box' }, h('h3', {}, "🧭 Let's Begin: where to start"));
-  add(box, h('p', {}, ['A', 'B', 'C', 'D', 'E', 'F'].map((k) => `Part ${k}: ${scores[k] ?? '–'}`).join(' · ')));
-  const advice = unit.placement(scores);
-  add(box, h('p', {}, advice || 'Finish the Let’s Begin parts to get advice.'));
-  return box;
+  add(main, h('h2', { class: 'section-title' }, `📊 ${p.name}'s Progress Tracker`), pages.tracker(p, { link: true }));
 }
 
 function settingsPage() {
   renderHeader('Settings');
-  const p = store.profile();
   const s = store.settings();
-
-  const nameInput = h('input', { type: 'text', class: 'write-input', value: p.name, 'aria-label': 'Name' });
-  nameInput.addEventListener('change', () => store.update((st) => { st.profiles[p.id].name = nameInput.value.trim() || p.name; }));
 
   const voiceSelect = h('select', { class: 'select', 'aria-label': 'Voice' }, h('option', { value: '' }, 'Best available voice'));
   const fillVoices = () => {
@@ -517,28 +479,7 @@ function settingsPage() {
     return drawOffline(st);
   });
   drawOffline(speech.offlineStatus());
-  const fileInput = h('input', { type: 'file', accept: 'application/json', class: 'hidden' });
-  fileInput.addEventListener('change', async () => {
-    const file = fileInput.files[0];
-    if (!file) return;
-    try {
-      store.importData(await file.text());
-      toast('Progress restored!', 'good');
-      go('#/');
-    } catch (err) {
-      toast(err.message, 'bad');
-    }
-  });
-
   add(main, h('section', { class: 'card settings' },
-    h('h2', {}, '🙂 Me'),
-    h('label', {}, 'My name ', nameInput),
-    h('div', { class: 'avatar-row' }, AVATARS.map((a) => h('button', {
-      type: 'button', class: `avatar-pick ${p.avatar === a ? 'selected' : ''}`, 'aria-label': a,
-      onclick: () => { store.update((st) => { st.profiles[p.id].avatar = a; }); settingsPage(); },
-    }, img(a, { cls: 'avatar' })))),
-    h('button', { type: 'button', class: 'btn ghost', onclick: () => go('#/profiles') }, '👥 Change child'),
-
     h('h2', {}, '🔊 Voice'),
     h('label', {}, 'Voice ', voiceSelect),
     h('label', {}, 'Accent ', accent),
@@ -565,86 +506,16 @@ function settingsPage() {
     }, '🎤 Test microphone') : null, micStatus,
 
     h('h2', {}, '💾 Saving'),
-    h('p', { class: 'muted' }, 'Progress and scores are saved automatically on this device after every answer. Make a backup to move progress to another device.'),
-    h('div', { class: 'controls left' },
-      h('button', {
-        type: 'button', class: 'btn ghost',
-        onclick: () => {
-          const blob = new Blob([store.exportData()], { type: 'application/json' });
-          const a = h('a', { href: URL.createObjectURL(blob), download: `english-adventures-backup-${new Date().toISOString().slice(0, 10)}.json` });
-          add(document.body, a);
-          a.click();
-          setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-        },
-      }, '⬇ Download backup'),
-      h('button', { type: 'button', class: 'btn ghost', onclick: () => fileInput.click() }, '⬆ Restore backup'),
-      fileInput),
+    h('p', { class: 'muted' }, family.mode === 'cloud'
+      ? 'Progress and scores are saved after every answer, on this device and online for the whole family.'
+      : 'Progress and scores are saved on this device after every answer.'),
 
     h('h2', {}, '👪 Grown-ups'),
-    h('p', { class: 'muted' }, 'Grown-up mode lets you give points for writing, speaking and reading tasks, and see the answer notes.'),
-    h('div', { class: 'controls left' },
-      adultMode
-        ? h('button', { type: 'button', class: 'btn ghost', onclick: () => { adultMode = false; settingsPage(); } }, 'Turn off grown-up mode')
-        : h('button', { type: 'button', class: 'btn ghost', onclick: async () => { if (await unlockAdult()) settingsPage(); } }, '🔒 Turn on grown-up mode'),
-      h('button', {
-        type: 'button', class: 'btn danger',
-        onclick: async () => {
-          if (!(await unlockAdult())) return;
-          if (!confirm(`Delete all progress for ${p.name}? This cannot be undone.`)) return;
-          store.update((st) => { st.profiles[p.id].progress = {}; st.profiles[p.id].lastLocation = null; });
-          toast('Progress reset.', 'good');
-          go('#/');
-        },
-      }, '🗑 Reset progress')),
+    h('p', { class: 'muted' }, 'Children, PINs, progress, backups and the parent password are in the parent area.'),
+    h('button', { type: 'button', class: 'btn ghost', onclick: () => go('#/parent') }, '👪 Parent area'),
 
     h('h2', {}, 'ℹ️ About'),
     h('p', { class: 'small muted' }, BOOK.credits)));
-}
-
-function profilesPage() {
-  renderHeader('Who is learning?');
-  const list = h('div', { class: 'profile-list' });
-  for (const prof of Object.values(store.state.profiles)) {
-    add(list, h('div', { class: 'profile' },
-      h('button', { type: 'button', class: 'profile-pick', onclick: () => { store.selectProfile(prof.id); go('#/'); } },
-        img(prof.avatar, { cls: 'avatar big' }), h('span', {}, prof.name)),
-      h('button', {
-        type: 'button', class: 'icon-btn', 'aria-label': `Delete ${prof.name}`,
-        onclick: async () => {
-          if (!(await unlockAdult())) return;
-          if (confirm(`Delete ${prof.name} and all their progress?`)) { store.deleteProfile(prof.id); profilesPage(); }
-        },
-      }, '🗑')));
-  }
-  let avatar = AVATARS[Object.keys(store.state.profiles).length % AVATARS.length];
-  const nameInput = h('input', { type: 'text', class: 'write-input', placeholder: 'Your name', 'aria-label': 'Your name', maxlength: '30' });
-  const avatars = h('div', { class: 'avatar-row' });
-  const drawAvatars = () => {
-    clear(avatars);
-    AVATARS.forEach((a) => add(avatars, h('button', {
-      type: 'button', class: `avatar-pick ${a === avatar ? 'selected' : ''}`, 'aria-label': a,
-      onclick: () => { avatar = a; drawAvatars(); },
-    }, img(a, { cls: 'avatar' }))));
-  };
-  drawAvatars();
-  clear(main);
-  add(main, 
-    h('section', { class: 'hero small' }, img('cover', { cls: 'cover', alt: '' }),
-      h('div', { class: 'hero-text' }, h('h2', {}, BOOK.title), h('p', {}, BOOK.subtitle))),
-    list.childElementCount ? h('section', { class: 'card' }, h('h2', {}, 'Choose your name'), list) : null,
-    h('section', { class: 'card' },
-      h('h2', {}, list.childElementCount ? 'Add a new learner' : 'What is your name?'),
-      nameInput, h('p', {}, 'Choose a picture:'), avatars,
-      h('div', { class: 'controls' }, h('button', {
-        type: 'button', class: 'btn primary big',
-        onclick: () => {
-          if (!nameInput.value.trim()) { toast('Write your name first!', 'bad'); nameInput.focus(); return; }
-          store.createProfile(nameInput.value, avatar);
-          store.flush();
-          speak(`Hello, ${nameInput.value.trim()}! Let's begin!`);
-          go('#/');
-        },
-      }, "Let's go! ➜"))));
 }
 
 function certificatePage() {
@@ -671,6 +542,7 @@ function certificatePage() {
 
 // --------------------------------------------------------------------- boot
 route();
+family.start().catch((err) => toast(family.errorMessage(err), 'bad'));
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
