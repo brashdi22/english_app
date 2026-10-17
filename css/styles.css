@@ -475,3 +475,18 @@ td { cursor: pointer; }
   .save-status::first-letter { font-size: 0.8rem; }
   .me-btn .avatar-mini { width: 22px; height: 22px; }
 }
+
+/* ------------------------------------------------- accounts and families */
+.who-tabs .tab { font-size: 1.05rem; padding: 0.8rem; }
+.field-label { font-weight: 700; margin-top: 0.4rem; }
+.family-code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 2rem; font-weight: 800;
+  letter-spacing: 0.15em; color: var(--brand); background: #f4f8ff; border: 2px dashed var(--primary);
+  border-radius: 12px; padding: 0.4rem 0.8rem; display: inline-block;
+}
+.family-code.small-code { font-size: 1rem; padding: 0.05rem 0.4rem; letter-spacing: 0.1em; border-width: 1px; }
+.request-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; padding: 0.5rem 0; border-bottom: 1px solid var(--line); }
+.request-name { flex: 1; min-width: 8rem; }
+.profile .small-x { background: var(--chip); color: var(--muted); min-width: 30px; height: 30px; font-size: 0.8rem; }
+.pin-key.ok { background: var(--good); color: #fff; border-color: var(--good); }
+.pin-key.ok:disabled { opacity: 0.4; }

@@ -1,13 +1,16 @@
-// Family accounts online, with Firebase Authentication and Cloud Firestore.
+// Accounts online, with Firebase Authentication and Cloud Firestore.
 //
-// families/{familyId}                        family settings (parent password hash)
-// families/{familyId}/children/{childId}     name, picture, PIN hash, settings, summary
-// families/{familyId}/children/{childId}/progress/{activityId}   one saved activity
+// users/{uid}                         a child's or a parent's account
+// users/{kidUid}/progress/{activity}  a child's saved work (one document per activity)
+// families/{code}                     a family; code is the family ID children type
+// families/{code}/private/settings    the parent password hash (grown-up scoring)
+// families/{code}/requests/{kidUid}   join requests waiting for the parent
+// families/{code}/members/{kidUid}    accepted children + their scoreboard summary
 //
-// familyId is the family account's user id; firestore.rules only lets that
-// account read or write it. Records are saved as JSON text so any shape of
-// saved answer is allowed. Firestore keeps a copy on the device, so saving
-// works offline and catches up when the device is back online.
+// Who may read and write what is in firestore.rules. Children have no email:
+// their username becomes a made-up address that is never used for mail.
+// Records are saved as JSON text so any shape of saved answer is allowed.
+// Firestore keeps a copy on the device, so saving also works offline.
 
 import { FIREBASE_CONFIG } from './cloud-config.js';
 
@@ -31,15 +34,42 @@ function useEmulator() {
   }
 }
 
+// For testing the one-device mode on this computer: http://localhost:…/?local
+function useLocalOnly() {
+  const local = ['localhost', '127.0.0.1'].includes(globalThis.location?.hostname);
+  if (!local) return false;
+  try {
+    if (new URLSearchParams(location.search).has('local')) sessionStorage.setItem('englishApp.localOnly', '1');
+    return sessionStorage.getItem('englishApp.localOnly') === '1';
+  } catch {
+    return false;
+  }
+}
+
 const emulator = useEmulator();
-const config = emulator ? EMULATOR_CONFIG : FIREBASE_CONFIG;
+const config = useLocalOnly() ? null : (emulator ? EMULATOR_CONFIG : FIREBASE_CONFIG);
 
 export const configured = Boolean(config);
+
+const KID_EMAIL_DOMAIN = 'kids.example.com';
+// Firebase needs passwords of 6+ characters; a child's PIN is wrapped.
+const kidPassword = (pin) => `greenhill:${pin}`;
+export const kidEmail = (username) => `${normalizeUsername(username)}@${KID_EMAIL_DOMAIN}`;
+export const normalizeUsername = (name) => String(name).trim().toLowerCase();
+export const validUsername = (name) => /^[a-z0-9][a-z0-9_.-]{2,19}$/.test(normalizeUsername(name));
+
+// Family IDs avoid letters and numbers that look alike (0/O, 1/I).
+const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+export function newFamilyCode() {
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(8));
+  return [...bytes].map((b) => CODE_LETTERS[b % CODE_LETTERS.length]).join('');
+}
+export const normalizeCode = (code) => String(code).toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 let ready = null;
 
 export function init() {
-  if (!configured) return Promise.reject(new Error('Family accounts are not set up.'));
+  if (!configured) return Promise.reject(new Error('Accounts are not set up.'));
   ready ||= (async () => {
     const fb = await import('../vendor/firebase/firebase.js');
     const app = fb.initializeApp(config);
@@ -59,22 +89,37 @@ export function init() {
   return ready;
 }
 
+const ref = (fb, db, path) => fb.doc(db, path);
+const col = (fb, db, path) => fb.collection(db, path);
+
 // ------------------------------------------------------------------ auth
 export async function onAuth(callback) {
   const { fb, auth } = await init();
-  return fb.onAuthStateChanged(auth, (user) => callback(user ? { id: user.uid, email: user.email } : null));
+  return fb.onAuthStateChanged(auth, (user) => callback(user ? { uid: user.uid, email: user.email } : null));
 }
 
-export async function signUp(email, password) {
+export async function signUpKid(username, pin) {
+  const { fb, auth } = await init();
+  const cred = await fb.createUserWithEmailAndPassword(auth, kidEmail(username), kidPassword(pin));
+  return cred.user.uid;
+}
+
+export async function signInKid(username, pin) {
+  const { fb, auth } = await init();
+  const cred = await fb.signInWithEmailAndPassword(auth, kidEmail(username), kidPassword(pin));
+  return cred.user.uid;
+}
+
+export async function signUpParent(email, password) {
   const { fb, auth } = await init();
   const cred = await fb.createUserWithEmailAndPassword(auth, email.trim(), password);
-  return { id: cred.user.uid, email: cred.user.email };
+  return cred.user.uid;
 }
 
-export async function signIn(email, password) {
+export async function signInParent(email, password) {
   const { fb, auth } = await init();
   const cred = await fb.signInWithEmailAndPassword(auth, email.trim(), password);
-  return { id: cred.user.uid, email: cred.user.email };
+  return cred.user.uid;
 }
 
 export async function signOut() {
@@ -87,107 +132,193 @@ export async function resetPassword(email) {
   await fb.sendPasswordResetEmail(auth, email.trim());
 }
 
-export function errorMessage(err) {
+export function errorMessage(err, { kid = false } = {}) {
   const code = err?.code || '';
-  if (/invalid-credential|wrong-password|user-not-found|invalid-login/.test(code)) return 'That email or password is not right.';
-  if (/email-already-in-use/.test(code)) return 'There is already a family account with this email. Sign in instead.';
-  if (/invalid-email/.test(code)) return 'Please check the email address.';
+  if (/invalid-credential|wrong-password|user-not-found|invalid-login/.test(code)) {
+    return kid ? 'That username or PIN is not right.' : 'That email or password is not right.';
+  }
+  if (/email-already-in-use/.test(code)) {
+    return kid ? 'That username is taken. Please choose another one.' : 'There is already an account with this email. Log in instead.';
+  }
+  if (/invalid-email/.test(code)) return kid ? 'Please use only letters, numbers, dots, dashes and _.' : 'Please check the email address.';
   if (/weak-password/.test(code)) return 'Please choose a password with at least 6 characters.';
   if (/network-request-failed|unavailable/.test(code)) return 'No internet connection. Please try again when you are online.';
   if (/too-many-requests/.test(code)) return 'Too many tries. Please wait a few minutes and try again.';
+  if (/permission-denied/.test(code)) return 'That is not allowed.';
   return err?.message || 'Something went wrong. Please try again.';
 }
 
-// ---------------------------------------------------------------- family
-const familyDoc = (fb, db, familyId) => fb.doc(db, 'families', familyId);
-const childDoc = (fb, db, familyId, childId) => fb.doc(db, 'families', familyId, 'children', childId);
-const progressCol = (fb, db, familyId, childId) => fb.collection(db, 'families', familyId, 'children', childId, 'progress');
-
-export async function watchFamily(familyId, callback) {
+// --------------------------------------------------------------- accounts
+export async function getUser(uid) {
   const { fb, db } = await init();
-  return fb.onSnapshot(familyDoc(fb, db, familyId), (snap) => callback(snap.exists() ? snap.data() : null));
+  const snap = await fb.getDoc(ref(fb, db, `users/${uid}`));
+  return snap.exists() ? userFromData(uid, snap.data()) : null;
 }
 
-export async function saveFamily(familyId, data) {
-  const { fb, db } = await init();
-  await fb.setDoc(familyDoc(fb, db, familyId), data, { merge: true });
-}
-
-// --------------------------------------------------------------- children
-function childFromDoc(snap) {
-  const d = snap.data();
+function userFromData(uid, d) {
   return {
-    id: snap.id,
-    name: d.name,
-    avatar: d.avatar,
-    pinHash: d.pinHash || null,
+    uid,
+    role: d.role,
+    username: d.username || null,
+    email: d.email || null,
+    avatar: d.avatar || null,
+    familyCode: d.familyCode || null,
     settings: d.settings ? JSON.parse(d.settings) : {},
-    summary: d.summary ? JSON.parse(d.summary) : null,
-    lastLocation: d.lastLocation || null,
     createdAt: d.createdAt,
     updatedAt: d.updatedAt,
   };
 }
 
-export async function watchChildren(familyId, callback) {
+export async function watchUser(uid, callback) {
   const { fb, db } = await init();
-  return fb.onSnapshot(fb.collection(db, 'families', familyId, 'children'), (snap) => {
-    const changes = snap.docChanges().map((c) => ({ type: c.type, child: childFromDoc(c.doc) }));
-    callback(changes);
+  return fb.onSnapshot(ref(fb, db, `users/${uid}`), (snap) => callback(snap.exists() ? userFromData(uid, snap.data()) : null));
+}
+
+export async function saveUser(uid, data) {
+  const { fb, db } = await init();
+  const out = { ...data };
+  if (out.settings) out.settings = JSON.stringify(out.settings);
+  await fb.setDoc(ref(fb, db, `users/${uid}`), out, { merge: true });
+}
+
+// ---------------------------------------------------------------- families
+export async function createFamily(parentUid, parentPasswordHash) {
+  const { fb, db } = await init();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = newFamilyCode();
+    const existing = await fb.getDoc(ref(fb, db, `families/${code}`));
+    if (existing.exists()) continue;
+    await fb.setDoc(ref(fb, db, `families/${code}`), { parentUid, createdAt: new Date().toISOString() });
+    await fb.setDoc(ref(fb, db, `families/${code}/private/settings`), { parentPasswordHash });
+    return code;
+  }
+  throw new Error('Could not make a family ID. Please try again.');
+}
+
+export async function familyExists(code) {
+  const { fb, db } = await init();
+  const snap = await fb.getDoc(ref(fb, db, `families/${normalizeCode(code)}`));
+  return snap.exists();
+}
+
+export async function watchFamilySettings(code, callback) {
+  const { fb, db } = await init();
+  return fb.onSnapshot(ref(fb, db, `families/${code}/private/settings`),
+    (snap) => callback(snap.exists() ? snap.data() : null), () => callback(null));
+}
+
+export async function saveFamilySettings(code, data) {
+  const { fb, db } = await init();
+  await fb.setDoc(ref(fb, db, `families/${code}/private/settings`), data, { merge: true });
+}
+
+// --------------------------------------------------------------- joining
+export async function requestToJoin(code, kid) {
+  const { fb, db } = await init();
+  await fb.setDoc(ref(fb, db, `families/${code}/requests/${kid.uid}`), {
+    username: kid.username, avatar: kid.avatar, status: 'pending', createdAt: new Date().toISOString(),
   });
 }
 
-export async function saveChild(familyId, child) {
+export async function cancelRequest(code, kidUid) {
   const { fb, db } = await init();
-  const data = {};
-  for (const key of ['name', 'avatar', 'pinHash', 'lastLocation', 'createdAt', 'updatedAt']) {
-    if (child[key] !== undefined) data[key] = child[key];
-  }
-  if (child.settings) data.settings = JSON.stringify(child.settings);
-  if (child.summary) data.summary = JSON.stringify(child.summary);
-  await fb.setDoc(childDoc(fb, db, familyId, child.id), data, { merge: true });
+  await fb.deleteDoc(ref(fb, db, `families/${code}/requests/${kidUid}`));
 }
 
-export async function deleteChild(familyId, childId) {
+export async function watchMyRequest(code, kidUid, callback) {
   const { fb, db } = await init();
-  const progress = await fb.getDocs(progressCol(fb, db, familyId, childId));
-  const docs = progress.docs.map((d) => d.ref);
-  for (let i = 0; i < docs.length; i += 400) {
-    const batch = fb.writeBatch(db);
-    docs.slice(i, i + 400).forEach((ref) => batch.delete(ref));
-    await batch.commit();
-  }
-  await fb.deleteDoc(childDoc(fb, db, familyId, childId));
+  return fb.onSnapshot(ref(fb, db, `families/${code}/requests/${kidUid}`),
+    (snap) => callback(snap.exists() ? snap.data() : null), () => callback(null));
+}
+
+export async function watchRequests(code, callback) {
+  const { fb, db } = await init();
+  return fb.onSnapshot(col(fb, db, `families/${code}/requests`),
+    (snap) => callback(snap.docs.map((d) => ({ uid: d.id, ...d.data() }))));
+}
+
+export async function acceptRequest(code, kidUid, request) {
+  const { fb, db } = await init();
+  const batch = fb.writeBatch(db);
+  batch.set(ref(fb, db, `families/${code}/members/${kidUid}`), {
+    username: request.username, avatar: request.avatar || null, joinedAt: new Date().toISOString(),
+  });
+  batch.delete(ref(fb, db, `families/${code}/requests/${kidUid}`));
+  await batch.commit();
+}
+
+export async function rejectRequest(code, kidUid) {
+  const { fb, db } = await init();
+  await fb.updateDoc(ref(fb, db, `families/${code}/requests/${kidUid}`), { status: 'rejected' });
+}
+
+// --------------------------------------------------------------- members
+function memberFromDoc(d) {
+  const data = d.data();
+  return {
+    uid: d.id,
+    username: data.username,
+    avatar: data.avatar,
+    joinedAt: data.joinedAt,
+    summary: data.summary ? JSON.parse(data.summary) : null,
+  };
+}
+
+export async function watchMembers(code, callback) {
+  const { fb, db } = await init();
+  return fb.onSnapshot(col(fb, db, `families/${code}/members`),
+    (snap) => callback(snap.docs.map(memberFromDoc)), () => callback([]));
+}
+
+export async function watchMember(code, kidUid, callback) {
+  const { fb, db } = await init();
+  return fb.onSnapshot(ref(fb, db, `families/${code}/members/${kidUid}`),
+    (snap) => callback(snap.exists() ? memberFromDoc(snap) : null), () => callback(null));
+}
+
+export async function saveMemberSummary(code, kidUid, { summary, username, avatar }) {
+  const { fb, db } = await init();
+  const data = { summary: JSON.stringify(summary), updatedAt: new Date().toISOString() };
+  if (username) data.username = username;
+  if (avatar) data.avatar = avatar;
+  await fb.updateDoc(ref(fb, db, `families/${code}/members/${kidUid}`), data);
+}
+
+export async function removeMember(code, kidUid) {
+  const { fb, db } = await init();
+  await fb.deleteDoc(ref(fb, db, `families/${code}/members/${kidUid}`));
 }
 
 // --------------------------------------------------------------- progress
-export async function watchProgress(familyId, childId, callback) {
+export async function watchProgress(uid, callback) {
   const { fb, db } = await init();
-  return fb.onSnapshot(progressCol(fb, db, familyId, childId), (snap) => {
+  return fb.onSnapshot(col(fb, db, `users/${uid}/progress`), (snap) => {
     const changes = snap.docChanges()
       .filter((c) => c.type !== 'removed')
       .map((c) => ({ activityId: c.doc.id, record: JSON.parse(c.doc.data().json) }));
     if (changes.length) callback(changes);
-  });
+  }, () => {});
 }
 
-export async function saveProgress(familyId, childId, entries) {
+export async function saveProgress(uid, entries) {
   const { fb, db } = await init();
-  const batch = fb.writeBatch(db);
-  for (const { activityId, record } of entries) {
-    batch.set(fb.doc(progressCol(fb, db, familyId, childId), activityId), {
-      json: JSON.stringify(record),
-      updatedAt: record.updatedAt || new Date().toISOString(),
-    });
+  for (let i = 0; i < entries.length; i += 400) {
+    const batch = fb.writeBatch(db);
+    for (const { activityId, record } of entries.slice(i, i + 400)) {
+      batch.set(ref(fb, db, `users/${uid}/progress/${activityId}`), {
+        json: JSON.stringify(record),
+        updatedAt: record.updatedAt || new Date().toISOString(),
+      });
+    }
+    await batch.commit();
   }
-  await batch.commit();
 }
 
-export async function deleteProgress(familyId, childId, activityIds) {
+export async function deleteProgress(uid, activityIds) {
   const { fb, db } = await init();
   for (let i = 0; i < activityIds.length; i += 400) {
     const batch = fb.writeBatch(db);
-    activityIds.slice(i, i + 400).forEach((id) => batch.delete(fb.doc(progressCol(fb, db, familyId, childId), id)));
+    activityIds.slice(i, i + 400).forEach((id) => batch.delete(ref(fb, db, `users/${uid}/progress/${id}`)));
     await batch.commit();
   }
 }

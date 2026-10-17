@@ -48,39 +48,61 @@ and the Certificate. The pictures come from the book.
   this week), activities done, units finished, review scores, reading speed
   and words said.
 
-## Children, the parent area and family accounts
+## Accounts and families
 
-- **Children log in** by tapping their picture and typing their 4-digit PIN.
-  The 🚪 button in the top bar logs them out.
-- **👪 Parent area** (needs the parent password): add children and set their
-  PINs, see each child's Progress Tracker, reading records and "Not yet"
-  items, reset or remove a child, download a backup, and change the parent
-  password. The parent password starts as **`adminpass`**: please change it
-  in the parent area. It is stored only as a hash.
-- **Grown-up scoring**: some tasks are scored by an adult in the book (letter
-  sounds, writing, talking). Tap **🔒 Grown-up** and enter the parent
-  password to give those points. The "For the adult" notes from the book are
-  shown in purple boxes.
-- Because the app is a website, the password check runs on the device: it
-  keeps children out, but it is not strong security.
+The app works in one of two ways.
 
-### Family accounts (several devices)
+### With accounts (recommended; needs a free Firebase project, see below)
 
-Without any setup, children, PINs and progress are saved **on one device**.
-To let the children use **several devices** and to see their progress from
-your own phone, connect the app to a free Firebase project (about 15
-minutes, once):
+- **Children** create their own account with a **username and a PIN**
+  (4–8 numbers); no email needed. They can log in on **any device**. Each
+  device remembers the children who used it, so next time they just tap
+  their picture and type their PIN.
+- **Parents** create a parent account with their email and a password and
+  get a **family ID** (8 letters and numbers).
+- **Joining a family:** a child types the family ID when creating their
+  account, or later in **⚙️ Settings → My family**. The parent sees the
+  request in the parent area and **accepts or rejects** it. A child can
+  leave the family, and the parent can remove a child.
+- **The parent area** (log in as the parent on any device): the family ID,
+  join requests, each child's stars, activities, review scores and full
+  Progress Tracker with reading records and "Not yet" items.
+- **🏆 Scoreboard:** the children of the family compare stars (all time and
+  this week), activities done, units finished, review scores, reading speed
+  and words said. Only members of the same family see each other.
+- **Grown-up scoring** (letter sounds, writing, talking): on a child's
+  device, tap **🔒 Grown-up** and type the family's **grown-up password**.
+  It starts as **`adminpass`**; the parent can change it in the parent area
+  and the change reaches all the children's devices.
+- Work is saved on the device straight away (so it works offline) and in the
+  child's account when online.
+- **Security:** a child's data can only be read by the child and, once
+  accepted, by their family's parent (see [`firestore.rules`](firestore.rules)).
+  Passwords and PINs are stored only as hashes. PINs are short, so they keep
+  brothers and sisters apart rather than being strong security; choose a
+  longer PIN if that matters to you.
+- A forgotten child PIN cannot be reset by the parent (that would need a
+  server). The child can create a new account and join the family again.
+
+### Without accounts (until Firebase is set up)
+
+Children and progress stay on **one device**. A grown-up opens the **👪
+parent area** with the parent password (`adminpass` at first), adds the
+children with a picture and a 4-digit PIN, and can reset or remove them,
+change the password and download backups. The scoreboard compares the
+children of that device.
+
+### Setting up accounts (once, about 15 minutes)
 
 1. Go to [console.firebase.google.com](https://console.firebase.google.com),
    **Create a project** (any name, e.g. `greenhill-english`; Google Analytics
    is not needed). The free *Spark* plan is enough.
 2. **Build → Authentication → Get started → Sign-in method → Email/Password →
-   Enable → Save.**
+   Enable → Save.** (Children's accounts use this too, with their username.)
 3. **Build → Firestore Database → Create database**, choose a location near
    you, start in **production mode**.
 4. In Firestore, open the **Rules** tab, replace the rules with the contents
-   of [`firestore.rules`](firestore.rules) and **Publish**. (These rules let
-   each family read and write only its own data.)
+   of [`firestore.rules`](firestore.rules) and **Publish**.
 5. **Project settings (⚙️) → General → Your apps → Web (`</>`)**: register an
    app (no hosting needed) and copy the values of `firebaseConfig`.
 6. Paste them into [`js/cloud-config.js`](js/cloud-config.js)
@@ -89,13 +111,8 @@ minutes, once):
 7. **Authentication → Settings → Authorized domains → Add domain**: add your
    GitHub Pages address (e.g. `yourname.github.io`).
 
-Then open the app, choose **New family account**, and create it with your
-email and a password. You are taken to the parent area to add the children.
-On every other device the children use, sign in once with the same email and
-password. Progress is saved on the device straight away (so it also works
-offline) and shared with the family's other devices when online. Learners
-saved on a device before the family account was made can be added from the
-parent area.
+Then open the app, choose **I'm a parent → Create a parent account**, and
+give the family ID to the children.
 
 ## Running the app
 
@@ -132,9 +149,9 @@ Screen").
 ```
 index.html, css/styles.css
 js/app.js          screens, navigation, settings
-js/family.js       logins, parent password, syncing between devices
-js/family-pages.js sign-in, PIN pad, parent area, scoreboard
-js/cloud.js        Firebase (family accounts) — settings in js/cloud-config.js
+js/family.js       accounts, families, join requests, grown-up password, syncing
+js/family-pages.js log-in and sign-up pages, PIN pad, parent area, scoreboard
+js/cloud.js        Firebase (accounts) — settings in js/cloud-config.js
 js/progress.js     scores and summaries for the tracker and scoreboard
 js/accounts.js     password and PIN hashing
 js/runner.js       question-card exercises (checking, retries, scoring)
@@ -164,9 +181,11 @@ npm run precache       # run after adding or changing files (offline file list)
 The content test checks every id and picture, grades every exercise with its
 answer-key answer, and checks the review totals against the book.
 
-To try family accounts on your computer without a Firebase project, run the
+To try accounts on your computer without a Firebase project, run the
 Firebase emulator (`npx firebase-tools emulators:start --only auth,firestore
 --project demo-greenhill`) and open `http://localhost:8000/?emulator`.
+With the emulator running, `npm install` then `npm run test:emulator` checks
+the security rules (who can read and write what).
 
 The speech model is downloaded by the **Fetch offline speech model** workflow
 (`.github/workflows/fetch-speech-model.yml`), which saves it to `models/`.

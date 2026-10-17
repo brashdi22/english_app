@@ -36,7 +36,7 @@ test('PINs are 4 numbers', () => {
 
 test('a child logs in with the right PIN only (this-device family)', async () => {
   const store = createStore({ storage: memoryStorage() });
-  const family = createFamily(store);
+  const family = createFamily(store, { mode: 'local' });
   assert.equal(family.mode, 'local');
   const id = await family.addChild('Huda', 'lina', '2580');
   assert.equal(store.profile(), null, 'adding a child does not log them in');
@@ -50,7 +50,7 @@ test('a child logs in with the right PIN only (this-device family)', async () =>
 
 test('the parent can change the parent password (this-device family)', async () => {
   const store = createStore({ storage: memoryStorage() });
-  const family = createFamily(store);
+  const family = createFamily(store, { mode: 'local' });
   assert.ok(await family.checkParent('adminpass'));
   await family.setParentPassword('secret99');
   assert.ok(await family.checkParent('secret99'));

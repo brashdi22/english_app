@@ -206,15 +206,22 @@ function renderHeader(title) {
     h('h1', { class: 'top-title' }, title || BOOK.title),
     p ? saveEl : null,
     p ? h('span', { class: 'star-count', title: 'My stars' }, `⭐ ${totalStars()}`) : null,
-    adultMode ? h('button', { type: 'button', class: 'icon-btn adult-on', title: 'Grown-up mode on (tap to turn off)', onclick: () => { adultMode = false; route(); } }, '👪') : null,
+    adultMode && family.role() !== 'parent' ? h('button', { type: 'button', class: 'icon-btn adult-on', title: 'Grown-up mode on (tap to turn off)', onclick: () => { adultMode = false; route(); } }, '👪') : null,
     ready ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Scoreboard', title: 'Scoreboard', onclick: () => go('#/scoreboard') }, '🏆') : null,
     p ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'My progress', onclick: () => go('#/progress') }, '📊') : null,
     p ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Settings', onclick: () => go('#/settings') }, '⚙️') : null,
     p ? h('button', {
       type: 'button', class: 'icon-btn me-btn', title: `${p.name}: log out`, 'aria-label': `Log out ${p.name}`,
-      onclick: () => { if (confirm(`Log out, ${p.name}?`)) { family.logout(); adultMode = false; go('#/'); } },
-    }, img(p.avatar, { cls: 'avatar-mini' }), '🚪') : null,
-    !p && ready && !adultMode ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Parent area', title: 'Parent area', onclick: () => go('#/parent') }, '👪') : null,
+      onclick: async () => {
+        if (!confirm(`Log out, ${p.name}?`)) return;
+        adultMode = false;
+        if (family.role() === 'kid') await family.signOut();
+        else family.logout();
+        go('#/');
+      },
+    }, img(p.avatar || 'sam', { cls: 'avatar-mini' }), '🚪') : null,
+    !p && ready && family.role() === 'local' && !adultMode ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Parent area', title: 'Parent area', onclick: () => go('#/parent') }, '👪') : null,
+    family.role() === 'parent' ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Log out', title: 'Log out', onclick: async () => { adultMode = false; await family.signOut(); go('#/'); } }, '🚪') : null,
   );
 }
 
@@ -234,11 +241,21 @@ function route() {
   clear(main);
   shownPage = page || 'home';
   if (!family.ready) { shownPage = 'loading'; return pages.loadingPage(); }
-  if (!family.signedIn()) { shownPage = 'signin'; return pages.signInPage(); }
-  if (page === 'parent' && id === 'child') { shownPage = 'childprogress'; return pages.childProgressPage(sub); }
-  if (page === 'parent') return pages.parentPage();
+  if (!family.signedIn()) { shownPage = 'signin'; return pages.welcomePage(); }
   if (page === 'scoreboard') return pages.scoreboardPage();
-  if (!store.profile()) { shownPage = 'picker'; return pages.pickerPage(); }
+  // A parent account only has the parent area.
+  if (family.role() === 'parent') {
+    adultMode = true;
+    if (page === 'parent' && id === 'child') { shownPage = 'childprogress'; return pages.childProgressPage(sub); }
+    shownPage = 'parentdash';
+    return pages.parentPage();
+  }
+  if (family.role() === 'local') {
+    if (page === 'parent' && id === 'child') { shownPage = 'childprogress'; return pages.childProgressPage(sub); }
+    if (page === 'parent') return pages.parentPage();
+    if (!store.profile()) { shownPage = 'picker'; return pages.pickerPage(); }
+  }
+  if (!store.profile()) { shownPage = 'loading'; return pages.loadingPage(); }
   switch (page) {
     case 'unit': return unitPage(id);
     case 'act': return activityPage(id);
@@ -255,13 +272,14 @@ addEventListener('hashchange', route);
 // or where a grown-up is typing, are left alone.
 let shownPage = null;
 let liveTimer = null;
-const LIVE_PAGES = new Set(['loading', 'signin', 'picker', 'home', 'scoreboard', 'progress', 'childprogress']);
+const LIVE_PAGES = new Set(['loading', 'signin', 'picker', 'home', 'scoreboard', 'progress', 'childprogress', 'parentdash', 'settings']);
 function liveUpdate() {
   clearTimeout(liveTimer);
   liveTimer = setTimeout(() => {
     const wasWaiting = shownPage === 'loading' || shownPage === 'signin';
-    const nowWaiting = !family.ready || !family.signedIn();
+    const nowWaiting = !family.ready || !family.signedIn() || (family.role() === 'kid' && !store.profile());
     if (wasWaiting !== nowWaiting) return route();
+    if (shownPage === 'signin') return;
     if (!LIVE_PAGES.has(shownPage) || document.querySelector('dialog[open]')) return;
     if (main.contains(document.activeElement) && document.activeElement.matches('input, textarea, select')) return;
     route();
@@ -479,6 +497,10 @@ function settingsPage() {
     return drawOffline(st);
   });
   drawOffline(speech.offlineStatus());
+  if (family.role() === 'kid') {
+    shownPage = 'settings';
+    add(main, pages.kidPictureCard(), pages.kidFamilyCard());
+  }
   add(main, h('section', { class: 'card settings' },
     h('h2', {}, '🔊 Voice'),
     h('label', {}, 'Voice ', voiceSelect),
@@ -507,12 +529,14 @@ function settingsPage() {
 
     h('h2', {}, '💾 Saving'),
     h('p', { class: 'muted' }, family.mode === 'cloud'
-      ? 'Progress and scores are saved after every answer, on this device and online for the whole family.'
+      ? 'Progress and scores are saved after every answer, on this device and in your account, so you can carry on from any device.'
       : 'Progress and scores are saved on this device after every answer.'),
 
-    h('h2', {}, '👪 Grown-ups'),
-    h('p', { class: 'muted' }, 'Children, PINs, progress, backups and the parent password are in the parent area.'),
-    h('button', { type: 'button', class: 'btn ghost', onclick: () => go('#/parent') }, '👪 Parent area'),
+    family.role() === 'local' ? [
+      h('h2', {}, '👪 Grown-ups'),
+      h('p', { class: 'muted' }, 'Children, PINs, progress, backups and the parent password are in the parent area.'),
+      h('button', { type: 'button', class: 'btn ghost', onclick: () => go('#/parent') }, '👪 Parent area'),
+    ] : null,
 
     h('h2', {}, 'ℹ️ About'),
     h('p', { class: 'small muted' }, BOOK.credits)));

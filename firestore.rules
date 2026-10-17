@@ -1,12 +1,98 @@
 rules_version = '2';
 
-// Each family's data can only be read and written by that family's own
-// signed-in account. Children's progress, PINs and the scoreboard all live
-// under families/{familyId}, so no family can see another family's data.
+// Who can see and change what:
+//
+// users/{uid}                        a child's or a parent's account
+// users/{kidUid}/progress/{id}       a child's saved work
+//   - only the child can write it; the child and the parent of the family
+//     the child has joined (accepted member) can read it.
+//
+// families/{code}                    a family (code = the family ID children type)
+//   - any signed-in account can look a family up (to send a join request);
+//     only its parent can change it.
+// families/{code}/private/{doc}      the parent password hash: parent and members only
+// families/{code}/requests/{kidUid}  join requests: the child creates one, the parent
+//                                    accepts or rejects it
+// families/{code}/members/{kidUid}   accepted children, with the summary used by
+//                                    the scoreboard: the family can read them; only
+//                                    the parent can add a member (from a request)
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /families/{familyId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == familyId;
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function family(code) {
+      return get(/databases/$(database)/documents/families/$(code));
+    }
+
+    function isFamilyParent(code) {
+      return signedIn() && exists(/databases/$(database)/documents/families/$(code))
+        && family(code).data.parentUid == request.auth.uid;
+    }
+
+    function isMember(code) {
+      return signedIn() && exists(/databases/$(database)/documents/families/$(code)/members/$(request.auth.uid));
+    }
+
+    // The signed-in parent's family has this child as an accepted member.
+    function isParentOf(kidUid) {
+      let parent = get(/databases/$(database)/documents/users/$(request.auth.uid));
+      return parent.data.role == 'parent'
+        && parent.data.familyCode is string
+        && isFamilyParent(parent.data.familyCode)
+        && exists(/databases/$(database)/documents/families/$(parent.data.familyCode)/members/$(kidUid));
+    }
+
+    function onlyChanges(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isParentOf(uid));
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.role in ['kid', 'parent'];
+      allow update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.role == resource.data.role;
+      allow delete: if signedIn() && request.auth.uid == uid;
+
+      match /progress/{activityId} {
+        allow read: if signedIn() && (request.auth.uid == uid || isParentOf(uid));
+        allow write: if signedIn() && request.auth.uid == uid;
+      }
+    }
+
+    match /families/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() && request.resource.data.parentUid == request.auth.uid;
+      allow update: if isFamilyParent(code) && request.resource.data.parentUid == resource.data.parentUid;
+      allow delete: if isFamilyParent(code);
+
+      match /private/{doc} {
+        allow read: if isFamilyParent(code) || isMember(code);
+        allow write: if isFamilyParent(code);
+      }
+
+      match /requests/{kidUid} {
+        allow read: if isFamilyParent(code) || (signedIn() && request.auth.uid == kidUid);
+        allow create: if signedIn() && request.auth.uid == kidUid
+          && request.resource.data.status == 'pending';
+        allow update: if isFamilyParent(code)
+          || (signedIn() && request.auth.uid == kidUid && request.resource.data.status == 'pending');
+        allow delete: if isFamilyParent(code) || (signedIn() && request.auth.uid == kidUid);
+      }
+
+      match /members/{kidUid} {
+        allow read: if isFamilyParent(code) || isMember(code)
+          || (signedIn() && request.auth.uid == kidUid);
+        allow create: if isFamilyParent(code)
+          && exists(/databases/$(database)/documents/families/$(code)/requests/$(kidUid));
+        allow update: if isFamilyParent(code)
+          || (signedIn() && request.auth.uid == kidUid && onlyChanges(['summary', 'username', 'avatar', 'updatedAt']));
+        allow delete: if isFamilyParent(code) || (signedIn() && request.auth.uid == kidUid);
+      }
     }
   }
 }
