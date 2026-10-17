@@ -33,6 +33,8 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
   let accountProblem = null;
   let problemMessage = '';
   let localOpened = false; // the device's saved copy of this account is open
+  let notice = ''; // shown on the log-in page (e.g. "this account was deleted")
+  let wipeKey = null; // this device's copy of a deleted account, removed on log-out
   let creating = 0; // sign-ups in progress (their details are being saved)
   let missingWhileCreating = false;
   let authKnown = mode === 'local';
@@ -66,16 +68,17 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
       authKnown = true;
       if (!user) {
         store.switchKey(SIGNED_OUT_KEY);
+        if (wipeKey) { try { storage.removeItem(wipeKey); } catch { /* optional */ } wipeKey = null; }
         accountLoaded = true;
         update();
         return;
       }
+      notice = '';
       update();
       unsubs.push(await cloud.watchUser(user.uid, (u) => {
         if (!u || !u.role) {
           if (creating) { missingWhileCreating = true; return; } // being saved right now
-          if (account) return;
-          return setProblem('missing');
+          return accountGone(user);
         }
         const familyChanged = account?.familyCode !== u.familyCode || !account;
         account = { ...u, email: user.email };
@@ -93,6 +96,25 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
         if (!account) setProblem('error', cloud.errorMessage(err));
       }));
     });
+  }
+
+  // The account details are not there: deleted by the parent, or never made.
+  async function accountGone(user) {
+    let deleted = false;
+    try { deleted = await cloud.isDeleted(user.uid); } catch { /* treat as missing */ }
+    if (authUser?.uid !== user.uid) return;
+    if (!deleted) {
+      if (!account) setProblem('missing');
+      return;
+    }
+    const name = kidUsername(user.email);
+    if (name) forgetKid(name);
+    wipeKey = `englishApp.kid.${user.uid}`;
+    notice = name ? `The account "${name}" was deleted by a parent.` : 'This account was deleted.';
+    store.selectProfile(null);
+    // Frees the username; if Firebase wants a fresh log-in first, the login is
+    // deleted the next time it is used.
+    try { await cloud.deleteMyLogin(); } catch { await cloud.signOut(); }
   }
 
   function setProblem(kind, message = '') {
@@ -341,10 +363,10 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
   // Asks to join a family; the parent then accepts or rejects.
   async function joinFamily(code, kid = account) {
     const wanted = cloud.normalizeCode(code);
+    if (account && membership() === 'member') throw new Error('You are already in a family. Only your parent can remove you.');
     if (!(await cloud.familyExists(wanted))) throw new Error('There is no family with that ID. Please check it with your parent.');
-    // Asking to join a new family leaves the old one (or withdraws that request).
+    // Asking to join a new family withdraws the request to the old one.
     if (account?.familyCode && account.familyCode !== wanted) {
-      await cloud.removeMember(account.familyCode, kid.uid).catch(() => {});
       await cloud.cancelRequest(account.familyCode, kid.uid).catch(() => {});
     }
     await cloud.saveUser(kid.uid, { familyCode: wanted });
@@ -354,12 +376,6 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
   async function cancelJoin() {
     if (!familyCode()) return;
     await cloud.cancelRequest(familyCode(), account.uid).catch(() => {});
-    await cloud.saveUser(account.uid, { familyCode: null });
-  }
-
-  async function leaveFamily() {
-    if (!familyCode()) return;
-    await cloud.removeMember(familyCode(), account.uid).catch(() => {});
     await cloud.saveUser(account.uid, { familyCode: null });
   }
 
@@ -386,6 +402,23 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
 
   const rejectRequest = (kidUid) => cloud.rejectRequest(familyCode(), kidUid);
   const removeMember = (kidUid) => cloud.removeMember(familyCode(), kidUid);
+  const deleteChildAccount = (kidUid) => cloud.deleteKidAccount(familyCode(), kidUid);
+
+  // Deletes the parent's account and family; with deleteChildren, also the
+  // accounts of the children in the family. Asks for the password first.
+  async function deleteParentAccount(password, { deleteChildren = false } = {}) {
+    await cloud.confirmPassword(password);
+    const code = familyCode();
+    const uid = account.uid;
+    if (code) {
+      if (deleteChildren) for (const m of members) await cloud.deleteKidAccount(code, m.uid);
+      await cloud.deleteFamily(code);
+    }
+    await cloud.deleteUserDoc(uid);
+    wipeKey = `englishApp.parent.${uid}`;
+    notice = 'Your parent account has been deleted.';
+    await cloud.deleteMyLogin();
+  }
 
   async function signOut() {
     flush();
@@ -467,14 +500,17 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
     get problemMessage() { return problemMessage; },
     isKidLogin: () => Boolean(kidUsername(authUser?.email)),
     loginName: () => kidUsername(authUser?.email) || authUser?.email || '',
+    get notice() { return notice; },
+    clearNotice: () => { notice = ''; },
     finishAccount,
     familyCode,
     membership,
     get requests() { return requests.filter((r) => r.status === 'pending'); },
     // child accounts
-    recentKids, forgetKid, signUpKid, signInKid, joinFamily, cancelJoin, leaveFamily,
+    recentKids, forgetKid, signUpKid, signInKid, joinFamily, cancelJoin,
     // parent accounts
     signUpParent, signInParent, acceptRequest, rejectRequest, removeMember, watchProgress,
+    deleteChildAccount, deleteParentAccount,
     signOut, resetPassword: (email) => cloud.resetPassword(email),
     errorMessage: cloud.errorMessage,
     validUsername: cloud.validUsername,

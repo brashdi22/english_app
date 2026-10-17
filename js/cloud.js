@@ -132,6 +132,19 @@ export async function resetPassword(email) {
   await fb.sendPasswordResetEmail(auth, email.trim());
 }
 
+// Checks the password again (Firebase asks for this before deleting a login).
+export async function confirmPassword(password) {
+  const { fb, auth } = await init();
+  const user = auth.currentUser;
+  await fb.reauthenticateWithCredential(user, fb.EmailAuthProvider.credential(user.email, password));
+}
+
+// Deletes the login that is signed in on this device.
+export async function deleteMyLogin() {
+  const { fb, auth } = await init();
+  if (auth.currentUser) await fb.deleteUser(auth.currentUser);
+}
+
 export function errorMessage(err, { kid = false } = {}) {
   const code = err?.code || '';
   if (/invalid-credential|wrong-password|user-not-found|invalid-login/.test(code)) {
@@ -145,6 +158,7 @@ export function errorMessage(err, { kid = false } = {}) {
   if (/network-request-failed|unavailable/.test(code)) return 'No internet connection. Please try again when you are online.';
   if (/too-many-requests/.test(code)) return 'Too many tries. Please wait a few minutes and try again.';
   if (/permission-denied/.test(code)) return 'That is not allowed.';
+  if (/requires-recent-login/.test(code)) return 'Please log out and log in again, then try once more.';
   return err?.message || 'Something went wrong. Please try again.';
 }
 
@@ -296,6 +310,55 @@ export async function saveMemberSummary(code, kidUid, { summary, username, avata
 export async function removeMember(code, kidUid) {
   const { fb, db } = await init();
   await fb.deleteDoc(ref(fb, db, `families/${code}/members/${kidUid}`));
+}
+
+// -------------------------------------------------------------- deleting
+// A parent deletes a member's account: their work, their account details and
+// their place in the family. deleted/{kidUid} marks the login as deleted.
+export async function deleteKidAccount(code, kidUid) {
+  const { fb, db } = await init();
+  const progress = await fb.getDocs(col(fb, db, `users/${kidUid}/progress`));
+  for (let i = 0; i < progress.docs.length; i += 400) {
+    const batch = fb.writeBatch(db);
+    progress.docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+  }
+  // One batch: the rules check the parent against the family as it was before.
+  const batch = fb.writeBatch(db);
+  batch.set(ref(fb, db, `deleted/${kidUid}`), { deletedAt: new Date().toISOString() });
+  batch.delete(ref(fb, db, `users/${kidUid}`));
+  batch.delete(ref(fb, db, `families/${code}/members/${kidUid}`));
+  batch.delete(ref(fb, db, `families/${code}/requests/${kidUid}`));
+  await batch.commit();
+}
+
+export async function isDeleted(uid) {
+  const { fb, db } = await init();
+  return (await fb.getDoc(ref(fb, db, `deleted/${uid}`))).exists();
+}
+
+// A parent deletes their family (members keep their own accounts).
+export async function deleteFamily(code) {
+  const { fb, db } = await init();
+  const [members, requests] = await Promise.all([
+    fb.getDocs(col(fb, db, `families/${code}/members`)),
+    fb.getDocs(col(fb, db, `families/${code}/requests`)),
+  ]);
+  const refs = [...members.docs, ...requests.docs].map((d) => d.ref);
+  for (let i = 0; i < refs.length; i += 400) {
+    const batch = fb.writeBatch(db);
+    refs.slice(i, i + 400).forEach((r) => batch.delete(r));
+    await batch.commit();
+  }
+  const batch = fb.writeBatch(db);
+  batch.delete(ref(fb, db, `families/${code}/private/settings`));
+  batch.delete(ref(fb, db, `families/${code}`));
+  await batch.commit();
+}
+
+export async function deleteUserDoc(uid) {
+  const { fb, db } = await init();
+  await fb.deleteDoc(ref(fb, db, `users/${uid}`));
 }
 
 // --------------------------------------------------------------- progress

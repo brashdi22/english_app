@@ -62,8 +62,15 @@ The app works in one of two ways.
   get a **family ID** (8 letters and numbers).
 - **Joining a family:** a child types the family ID when creating their
   account, or later in **⚙️ Settings → My family**. The parent sees the
-  request in the parent area and **accepts or rejects** it. A child can
-  leave the family, and the parent can remove a child.
+  request in the parent area and **accepts or rejects** it. Only the parent
+  can take a child out of the family (**Remove from family**); children
+  cannot leave by themselves.
+- **Deleting accounts** (parent only): **🗑 Delete account** on a child's
+  card deletes that child's account and all their work; their devices are
+  logged out and the username becomes free again. **Delete my parent
+  account** (bottom of the parent area, needs the log-in password) deletes
+  the parent account and the family, and, if ticked, the children's
+  accounts too. Children cannot delete their own account.
 - **The parent area** (log in as the parent on any device): the family ID,
   join requests, each child's stars, activities, review scores and full
   Progress Tracker with reading records and "Not yet" items.
@@ -77,7 +84,9 @@ The app works in one of two ways.
 - Work is saved on the device straight away (so it works offline) and in the
   child's account when online.
 - **Security:** a child's data can only be read by the child and, once
-  accepted, by their family's parent (see [`firestore.rules`](firestore.rules)).
+  accepted, by their family's parent, and only that parent can remove or
+  delete them (see [`firestore.rules`](firestore.rules); after changing
+  the rules, publish them again in the Firebase console).
   Passwords and PINs are stored only as hashes. PINs are short, so they keep
   brothers and sisters apart rather than being strong security; choose a
   longer PIN if that matters to you.

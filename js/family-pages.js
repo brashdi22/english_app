@@ -156,6 +156,7 @@ export function familyPages(ctx) {
     const tabs = h('div', { class: 'tabs who-tabs' },
       h('button', { type: 'button', class: `tab ${tab.startsWith('kid') ? 'on' : ''}`, onclick: () => { clear(main); welcomePage('kid'); } }, '🧒 I’m a child'),
       h('button', { type: 'button', class: `tab ${tab.startsWith('parent') ? 'on' : ''}`, onclick: () => { clear(main); welcomePage('parent'); } }, '👪 I’m a parent'));
+    if (family.notice) add(main, h('p', { class: 'card notice warn', role: 'status' }, family.notice));
     add(main,
       h('section', { class: 'hero small' }, img('cover', { cls: 'cover', alt: '' }),
         h('div', { class: 'hero-text' }, h('h2', {}, BOOK.title), h('p', {}, BOOK.subtitle))),
@@ -331,14 +332,7 @@ export function familyPages(ctx) {
     const code = family.familyCode();
     if (state === 'member') {
       add(card, h('p', {}, '✓ You are in the family ', h('strong', { class: 'family-code small-code' }, code), '. Your parent can see your progress, and you are on the family scoreboard.'),
-        h('button', {
-          type: 'button', class: 'btn ghost',
-          onclick: async () => {
-            if (!confirm('Leave this family? Your parent will not see your progress any more.')) return;
-            await family.leaveFamily();
-            toast('You left the family.', 'good');
-          },
-        }, 'Leave the family'));
+        h('p', { class: 'small muted' }, 'Only your parent can take you out of the family.'));
       return card;
     }
     if (state === 'pending') {
@@ -414,7 +408,35 @@ export function familyPages(ctx) {
       passwordCard(),
       h('div', { class: 'controls' },
         h('button', { type: 'button', class: 'btn ghost', onclick: () => go('#/scoreboard') }, '🏆 Scoreboard'),
-        h('button', { type: 'button', class: 'btn ghost', onclick: async () => { await family.signOut(); go('#/'); } }, '🚪 Log out')));
+        h('button', { type: 'button', class: 'btn ghost', onclick: async () => { await family.signOut(); go('#/'); } }, '🚪 Log out')),
+      deleteParentCard());
+  }
+
+  function deleteParentCard() {
+    const pw = field({ type: 'password', placeholder: 'Your log-in password', autocomplete: 'current-password', 'aria-label': 'Your log-in password' });
+    const withKids = h('input', { type: 'checkbox', 'aria-label': 'Also delete the children’s accounts' });
+    const status = formStatus();
+    const button = h('button', { type: 'submit', class: 'btn danger' }, '🗑 Delete my account');
+    return h('details', { class: 'card danger-zone' },
+      h('summary', {}, 'Delete my parent account'),
+      h('p', { class: 'small' }, 'This deletes your parent account and your family. The children keep their own accounts unless you tick the box below. This cannot be undone.'),
+      h('form', {
+        class: 'auth-form',
+        onsubmit: async (e) => {
+          e.preventDefault();
+          if (!pw.value) { status.textContent = 'Type your log-in password to confirm.'; return; }
+          const what = withKids.checked ? 'your account, your family and all the children’s accounts' : 'your account and your family';
+          if (!confirm(`Delete ${what}? This cannot be undone.`)) return;
+          button.disabled = true;
+          status.textContent = 'Deleting…';
+          try {
+            await family.deleteParentAccount(pw.value, { deleteChildren: withKids.checked });
+          } catch (err) {
+            status.textContent = family.errorMessage(err);
+            button.disabled = false;
+          }
+        },
+      }, pw, h('label', { class: 'tick-row' }, withKids, ' Also delete the children’s accounts and all their work'), button, status));
   }
 
   // =============================================== THIS-DEVICE (no accounts)
@@ -426,6 +448,7 @@ export function familyPages(ctx) {
       add(grid, h('button', { type: 'button', class: 'profile-pick', onclick: () => childLogin(child) },
         img(child.avatar, { cls: 'avatar big' }), h('span', {}, child.name)));
     }
+    if (family.notice) add(main, h('p', { class: 'card notice warn', role: 'status' }, family.notice));
     add(main,
       h('section', { class: 'hero small' }, img('cover', { cls: 'cover', alt: '' }),
         h('div', { class: 'hero-text' }, h('h2', {}, BOOK.title), h('p', {}, 'Tap your picture to start.'))),
@@ -517,6 +540,18 @@ export function familyPages(ctx) {
             await family.removeMember(child.id);
           },
         }, 'Remove from family'),
+        h('button', {
+          type: 'button', class: 'btn small danger',
+          onclick: async () => {
+            if (!confirm(`Delete ${child.name}'s account? All of ${child.name}'s work is deleted and the account cannot be used any more. This cannot be undone.`)) return;
+            try {
+              await family.deleteChildAccount(child.id);
+              toast(`${child.name}'s account was deleted.`, 'good');
+            } catch (err) {
+              toast(family.errorMessage(err), 'bad');
+            }
+          },
+        }, '🗑 Delete account'),
       ]
       : [
         h('button', { type: 'button', class: 'btn small primary', onclick: () => go(`#/parent/child/${child.id}`) }, '📊 Progress'),

@@ -490,3 +490,9 @@ td { cursor: pointer; }
 .profile .small-x { background: var(--chip); color: var(--muted); min-width: 30px; height: 30px; font-size: 0.8rem; }
 .pin-key.ok { background: var(--good); color: #fff; border-color: var(--good); }
 .pin-key.ok:disabled { opacity: 0.4; }
+
+/* Deleting accounts */
+.danger-zone summary { cursor: pointer; font-weight: 700; color: var(--bad); }
+.tick-row { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.95rem; }
+.tick-row input { width: 1.2rem; height: 1.2rem; margin-top: 0.15rem; flex: none; }
+.card.notice { font-weight: 700; }

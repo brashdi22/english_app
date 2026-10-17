@@ -10,4 +10,4 @@ Rebuild:
     npm install firebase@13.0.0 esbuild
     npx esbuild entry.js --bundle --format=esm --minify --target=es2020 --legal-comments=eof --outfile=firebase.js
 
-`entry.js` re-exports the functions imported in `js/cloud.js`.
+`entry.js` re-exports the functions imported in `js/cloud.js` (built with esbuild 0.24.0).

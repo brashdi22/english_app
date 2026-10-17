@@ -72,6 +72,8 @@ test('any signed-in child can look up a family ID, but not list families', async
 });
 
 test('a child can ask to join, but cannot make themselves a member', async () => {
+  await assertFails(setDoc(doc(as('zara'), `families/${CODE}/requests/zara`), { status: 'pending', username: 'zara' }));
+  await assertSucceeds(updateDoc(doc(as('zara'), 'users/zara'), { familyCode: CODE }));
   await assertSucceeds(setDoc(doc(as('zara'), `families/${CODE}/requests/zara`), { status: 'pending', username: 'zara' }));
   await assertFails(setDoc(doc(as('zara'), `families/${CODE}/requests/zara`), { status: 'accepted', username: 'zara' }));
   await assertFails(setDoc(doc(as('zara'), `families/${CODE}/members/zara`), { username: 'zara' }));
@@ -115,9 +117,49 @@ test('members read the parent password hash for grown-up scoring; outsiders do n
   await assertFails(setDoc(doc(as('huda'), `families/${CODE}/private/settings`), { parentPasswordHash: 'y' }));
 });
 
-test('only the parent changes or removes members; a child can leave', async () => {
+test('only the parent removes members; a child cannot leave or switch family', async () => {
   await assertFails(deleteDoc(doc(as('omar'), `families/${CODE}/members/huda`)));
-  await assertSucceeds(deleteDoc(doc(as('huda'), `families/${CODE}/members/huda`)));
+  await assertFails(deleteDoc(doc(as('huda'), `families/${CODE}/members/huda`)));
+  await assertFails(updateDoc(doc(as('huda'), 'users/huda'), { familyCode: null }));
+  await assertFails(updateDoc(doc(as('huda'), 'users/huda'), { familyCode: 'OTHER999' }));
+  await assertFails(setDoc(doc(as('huda'), 'families/OTHER999/requests/huda'), { status: 'pending', username: 'huda' }));
+  await assertSucceeds(updateDoc(doc(as('huda'), 'users/huda'), { avatar: 'lina' }));
+  // A child who only asked to join can change their mind.
+  await assertSucceeds(deleteDoc(doc(as('omar'), `families/${CODE}/requests/omar`)));
+  await assertSucceeds(updateDoc(doc(as('omar'), 'users/omar'), { familyCode: 'OTHER999' }));
+  // Once the parent removes a child, the child can join another family.
+  await assertSucceeds(deleteDoc(doc(as('mum'), `families/${CODE}/members/huda`)));
+  await assertSucceeds(updateDoc(doc(as('huda'), 'users/huda'), { familyCode: 'OTHER999' }));
+});
+
+test("the parent deletes a member's account; the login cannot make a new one", async () => {
+  await assertFails(deleteDoc(doc(as('huda'), 'users/huda')));
+  await assertFails(deleteDoc(doc(as('otherdad'), 'users/huda/progress/ch1-2')));
+  await assertFails(setDoc(doc(as('otherdad'), 'deleted/huda'), { deletedAt: 'now' }));
+  await assertFails(deleteDoc(doc(as('mum'), 'users/omar'))); // only asked to join
+  await assertSucceeds(deleteDoc(doc(as('mum'), 'users/huda/progress/ch1-2')));
+  const db = as('mum');
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'deleted/huda'), { deletedAt: 'now' });
+  batch.delete(doc(db, 'users/huda'));
+  batch.delete(doc(db, `families/${CODE}/members/huda`));
+  batch.delete(doc(db, `families/${CODE}/requests/huda`));
+  await assertSucceeds(batch.commit());
+  await assertSucceeds(getDoc(doc(as('huda'), 'deleted/huda')));
+  await assertFails(getDoc(doc(as('zara'), 'deleted/huda')));
+  await assertFails(setDoc(doc(as('huda'), 'users/huda'), { role: 'kid', username: 'huda' }));
+});
+
+test('a parent deletes their own family and account', async () => {
+  const db = as('mum');
+  const batch = writeBatch(db);
+  batch.delete(doc(db, `families/${CODE}/members/huda`));
+  batch.delete(doc(db, `families/${CODE}/requests/omar`));
+  batch.delete(doc(db, `families/${CODE}/private/settings`));
+  batch.delete(doc(db, `families/${CODE}`));
+  await assertFails(deleteDoc(doc(as('otherdad'), `families/${CODE}`)));
+  await assertSucceeds(batch.commit());
+  await assertSucceeds(deleteDoc(doc(as('mum'), 'users/mum')));
 });
 
 test("nobody can take over someone else's family", async () => {
