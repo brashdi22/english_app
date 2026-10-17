@@ -10,6 +10,7 @@ export const DEFAULT_SETTINGS = {
   accent: 'en-US',
   voiceName: '',
   autoSpeak: true,
+  listenEngine: 'offline',
 };
 
 function emptyState() {

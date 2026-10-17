@@ -7,6 +7,7 @@ import { runActivity, isRunnerType } from './runner.js';
 import { SCREENS, renderBlocks } from './screens.js';
 import { activityPoints } from './points.js';
 
+const MODEL_MB = 40;
 const AVATARS = ['sam', 'lina', 'ben', 'dina', 'max', 'mrs-green', 'mr-hill', 'ms-rose', 'gran-mona'];
 
 // ------------------------------------------------------------ index content
@@ -73,7 +74,7 @@ const env = {
   store,
   speak,
   stop: () => { speech.stopSpeaking(); speech.stopListening(); },
-  listen: (opts = {}) => speech.listen({ lang: store.settings().accent, ...opts }),
+  listen: (opts = {}) => speech.listen({ settings: store.settings(), ...opts }),
   canListen: speech.canListen,
   sound,
   settings: () => store.settings(),
@@ -198,6 +199,7 @@ function backFromHere() {
 // ------------------------------------------------------------------ router
 function route() {
   env.stop();
+  speech.releaseMicrophone();
   const [, page, id] = (location.hash || '#/').split('/');
   clear(main);
   if (!store.profile() && page !== 'profiles') return profilesPage();
@@ -336,6 +338,33 @@ function unitPage(id) {
   scrollTo(0, 0);
 }
 
+// Shows the one-time download of the offline listening helper.
+function offlineBanner() {
+  const bar = h('span', { class: 'bar' }, h('span'));
+  const text = h('span');
+  const el = h('div', { class: 'note offline-banner hidden', role: 'status' }, h('span', { class: 'note-icon' }, '🎧'), h('div', {}, text, bar));
+  const draw = (st) => {
+    if (!el.isConnected && el.dataset.drawn) { stopWatching(); return; }
+    el.dataset.drawn = '1';
+    const pct = Math.min(100, Math.round((st.loaded / st.total) * 100));
+    el.classList.toggle('hidden', st.state === 'ready' || st.state === 'idle');
+    bar.classList.toggle('hidden', st.cached || st.state !== 'loading');
+    bar.firstChild.style.width = `${pct}%`;
+    if (st.state === 'loading') {
+      text.textContent = st.cached
+        ? 'Getting listening ready…'
+        : `Getting offline listening ready (first time only, about ${MODEL_MB} MB)… ${pct}%`;
+    } else if (st.state === 'failed') {
+      text.textContent = speech.canListenOnline
+        ? 'Offline listening could not start on this device, so the browser\u2019s listening is used instead.'
+        : 'Offline listening could not start on this device. A grown-up can mark the speaking instead.';
+    }
+  };
+  const stopWatching = speech.onOfflineStatus(draw);
+  draw(speech.offlineStatus());
+  return el;
+}
+
 function typeIcon(type) {
   return { words: '🔤', info: '💡', speak: '🎤', story: '📖', dialogue: '🎭', open: '✏️', adult: '👪', ask: '💬', check: '✅' }[type] || '•';
 }
@@ -358,7 +387,10 @@ function activityPage(id) {
   const body = h('div', { class: 'act-body' });
   add(wrap, body);
   add(main, wrap);
-  if (['words', 'speak', 'story', 'dialogue', 'ask'].includes(act.type)) speech.prepareMicrophone();
+  if (['words', 'speak', 'story', 'dialogue', 'ask'].includes(act.type)) {
+    speech.prepareMicrophone(store.settings());
+    if (speech.engine(store.settings()) === 'offline') wrap.insertBefore(offlineBanner(), body);
+  }
   if (isRunnerType(act.type)) runActivity(body, act, env);
   else SCREENS[act.type](body, act, env);
   if (store.settings().autoSpeak && !['story', 'speak'].includes(act.type)) setTimeout(() => speak(instruction), 300);
@@ -464,6 +496,27 @@ function settingsPage() {
   auto.addEventListener('change', () => store.updateSettings({ autoSpeak: auto.checked }));
 
   const micStatus = h('span', { class: 'muted' });
+  const engineName = speech.engine(s);
+  const engineOffline = h('input', { type: 'radio', name: 'engine', checked: engineName === 'offline' });
+  const engineBrowser = h('input', { type: 'radio', name: 'engine', checked: engineName === 'browser' });
+  engineOffline.addEventListener('change', () => { store.updateSettings({ listenEngine: 'offline' }); settingsPage(); });
+  engineBrowser.addEventListener('change', () => { store.updateSettings({ listenEngine: 'browser' }); settingsPage(); });
+  const offlineState = h('p', { class: 'muted' });
+  const drawOffline = (st) => {
+    clear(offlineState);
+    if (st.state === 'ready') add(offlineState, '✓ Offline listening is ready on this device.');
+    else if (st.state === 'loading') add(offlineState, `Downloading… ${Math.round((st.loaded / st.total) * 100)}%`);
+    else if (st.state === 'failed') add(offlineState, 'Offline listening could not start on this device.');
+    else if (engineName === 'offline') {
+      add(offlineState, st.cached ? 'Downloaded. It starts when a speaking exercise opens. ' : 'Not downloaded yet. ',
+        h('button', { type: 'button', class: 'btn small ghost', onclick: () => speech.prepareMicrophone(store.settings()) }, st.cached ? 'Start now' : 'Download now'));
+    }
+  };
+  const stopWatching = speech.onOfflineStatus((st) => {
+    if (!offlineState.isConnected) return stopWatching();
+    return drawOffline(st);
+  });
+  drawOffline(speech.offlineStatus());
   const fileInput = h('input', { type: 'file', accept: 'application/json', class: 'hidden' });
   fileInput.addEventListener('change', async () => {
     const file = fileInput.files[0];
@@ -493,10 +546,11 @@ function settingsPage() {
     h('label', { class: 'check' }, auto, ' Read instructions and praise aloud automatically'),
     h('button', { type: 'button', class: 'btn ghost', onclick: () => speak('Hello! I am Sam. Welcome to Greenhill!') }, '▶ Test voice'),
 
-    h('h2', {}, '🎤 Microphone'),
-    h('p', { class: 'muted' }, speech.canListen
-      ? 'The app listens when the child taps 🎤. Speech is processed by the browser’s speech service, which needs an internet connection.'
-      : 'This browser cannot listen. Use Chrome, Edge or Safari for the speaking tasks.'),
+    h('h2', {}, '🎤 Listening'),
+    speech.canListenOffline ? h('label', { class: 'check' }, engineOffline, ' On this device (recommended). Works offline and is made to listen for the book\u2019s words. Downloads about ' + MODEL_MB + ' MB the first time.') : null,
+    speech.canListenOnline ? h('label', { class: 'check' }, engineBrowser, ' The browser\u2019s listening (needs internet).') : null,
+    speech.canListenOffline ? offlineState : null,
+    speech.canListen ? null : h('p', { class: 'muted' }, 'This browser cannot listen. A grown-up can mark the speaking tasks instead.'),
     speech.canListen ? h('button', {
       type: 'button', class: 'btn ghost',
       onclick: async () => {

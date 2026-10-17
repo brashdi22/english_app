@@ -136,6 +136,14 @@ export function scorePronunciation(target, alternatives, extraAccepted = []) {
   return { ...best, stars: starsForScore(best.score) };
 }
 
+// The offline recognizer also says how sure it is (0–1) that it heard the
+// word. A word it recognized but wasn't sure about gets fewer stars.
+export function withConfidence(stars, confidence) {
+  if (confidence == null || !stars) return stars;
+  const cap = confidence >= 0.85 ? 3 : confidence >= 0.6 ? 2 : 1;
+  return Math.min(stars, cap);
+}
+
 export function starsForScore(score) {
   if (score >= 0.99) return 3;
   if (score >= 0.75) return 2;

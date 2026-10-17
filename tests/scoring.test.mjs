@@ -98,3 +98,12 @@ test('pronunciation forgives near-misses a recognizer makes with learners', () =
   assert.equal(scorePronunciation('apple', ['orange']).stars, 0);
   assert.equal(scorePronunciation('school', ['banana']).stars, 0);
 });
+
+test('the offline recognizer\'s confidence limits the stars', async () => {
+  const { withConfidence } = await import('../js/scoring.js');
+  assert.equal(withConfidence(3, 0.95), 3);
+  assert.equal(withConfidence(3, 0.7), 2);
+  assert.equal(withConfidence(3, 0.3), 1);
+  assert.equal(withConfidence(2, undefined), 2);
+  assert.equal(withConfidence(0, 0.99), 0);
+});

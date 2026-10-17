@@ -20,7 +20,10 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  if (request.method !== 'GET' || new URL(request.url).origin !== location.origin) return;
+  const url = new URL(request.url);
+  if (request.method !== 'GET' || url.origin !== location.origin) return;
+  // The speech model is large and kept by the recognizer itself (IndexedDB).
+  if (url.pathname.includes('/models/')) return;
   event.respondWith(
     caches.match(request, { ignoreSearch: true }).then((hit) => hit || fetch(request).then((res) => {
       if (res.ok) {

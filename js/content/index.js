@@ -77,6 +77,6 @@ const reference = {
 export const BOOK = {
   title: 'English Adventures in Greenhill',
   subtitle: 'A 12-week English reading and writing course for beginners aged 10. Words · Reading · Grammar · Writing · Speaking',
-  credits: 'English Adventures in Greenhill — interactive edition. Pictures: Twemoji icons (© Twitter, Inc. and other contributors, licensed CC-BY 4.0) and drawings made for the book. Characters, places and events in the story are made up.',
+  credits: 'English Adventures in Greenhill — interactive edition. Pictures: Twemoji icons (© Twitter, Inc. and other contributors, licensed CC-BY 4.0) and drawings made for the book. Characters, places and events in the story are made up. Offline listening: vosk-browser (Ciaran O\u2019Reilly) and the Vosk English model (Alpha Cephei), licensed Apache-2.0.',
   units: [begin, starter, ch1, ch2, ch3, cp1, ch4, ch5, ch6, cp2, ch7, ch8, ch9, cp3, ch10, final, reference],
 };

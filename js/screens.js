@@ -3,7 +3,7 @@
 // grown-up scoring and the Progress Check.
 
 import { h, add, clear, img, picture, rich, stars, formatTime, toast } from './ui.js';
-import { scorePronunciation, compareReading } from './scoring.js';
+import { scorePronunciation, compareReading, withConfidence } from './scoring.js';
 
 const SPEAKER_PITCH = { Sam: 1.15, Ben: 1.25, Lina: 1.35, Dina: 1.5, 'Mrs Green': 1.0, 'Mr Hill': 0.8, 'Ms Rose': 1.05, Adult: 0.95, You: 1.2 };
 const pitchFor = (speaker) => SPEAKER_PITCH[speaker] ?? 1.05;
@@ -92,8 +92,9 @@ export function wordsScreen(root, act, env) {
               btn.classList.add('starting');
               status.textContent = 'Wait…';
               try {
-                const { alternatives } = await env.listen({ onReady: () => micReady(btn, status, 'Say the word now!') });
-                const result = scorePronunciation(w.word, alternatives, w.accept);
+                const heardNow = await env.listen({ expected: all.map((x) => x.word), onReady: () => micReady(btn, status, 'Say the word now!') });
+                const result = scorePronunciation(w.word, heardNow.alternatives, w.accept);
+                result.stars = withConfidence(result.stars, heardNow.confidence);
                 status.textContent = result.stars >= PRACTICE_PASS ? `✓ I heard "${result.heard}"` : `I heard "${result.heard}". Try again!`;
                 if (result.stars > (best[w.word] || 0)) {
                   best[w.word] = result.stars;
@@ -250,7 +251,12 @@ export function speakScreen(root, act, env) {
       mic.disabled = true;
       status.textContent = 'Wait…';
       try {
-        const { alternatives } = await env.listen({ onReady: () => micReady(mic, status, repeat ? 'Speak now!' : 'Read it now!') });
+        const heardNow = await env.listen({
+          expected: items.flatMap((it) => [it.text, ...(it.accept || [])]),
+          mode: text.trim().includes(' ') ? 'sentence' : 'word',
+          onReady: () => micReady(mic, status, repeat ? 'Speak now!' : 'Read it now!'),
+        });
+        const { alternatives } = heardNow;
         const result = scorePronunciation(text, alternatives, item.accept);
         let got = result.stars;
         if (text.trim().includes(' ')) {
@@ -258,6 +264,7 @@ export function speakScreen(root, act, env) {
           const cmp = compareReading(text, result.heard || alternatives[0]);
           got = Math.max(got, sentenceStars((cmp.words.length - cmp.mistakes) / cmp.words.length));
         }
+        got = withConfidence(got, heardNow.confidence);
         record(got, result.heard);
         const msg = got >= pass
           ? ['', 'Good! Try again for more stars.', 'Very good!', 'Perfect!'][got]
@@ -416,6 +423,8 @@ export function storyScreen(root, act, env) {
         status.textContent = 'Wait…';
         try {
           const { alternatives } = await env.listen({
+            expected: lineEls.map((l) => l.line.text),
+            mode: 'sentence',
             timeoutMs: 6000 + line.text.length * 120,
             onReady: () => { status.textContent = '🎤 Read this line aloud now!'; },
           });
@@ -525,6 +534,8 @@ export function dialogueScreen(root, act, env) {
         status.textContent = `Your turn, ${role}! Wait…`;
         try {
           const { alternatives } = await env.listen({
+            expected: act.lines.map((l) => l.text),
+            mode: 'sentence',
             timeoutMs: 6000 + line.text.length * 120,
             onReady: () => { status.textContent = `🎤 Say your line now, ${role}!`; },
           });
@@ -744,7 +755,7 @@ export function askScreen(root, act, env) {
         mic.classList.add('starting');
         heard.textContent = 'Wait…';
         try {
-          const { alternatives } = await env.listen({ timeoutMs: 9000, onReady: () => micReady(mic, heard, 'Answer now!') });
+          const { alternatives } = await env.listen({ mode: 'sentence', timeoutMs: 9000, onReady: () => micReady(mic, heard, 'Answer now!') });
           answers[i] = { text: alternatives[0], points: suggest(alternatives[0]) };
           save();
           draw();

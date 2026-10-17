@@ -57,14 +57,21 @@ shown in purple boxes.
 
 ## Running the app
 
-The app is a static website with no build step. Speaking and listening use the
-browser's Web Speech API:
+The app is a static website with no build step. It reads aloud with the
+browser's text-to-speech. To listen to the child it uses, by default, an
+**offline recognizer that runs on the device** ([Vosk](https://alphacephei.com/vosk/),
+small English model, in `models/`). The app tells it which words the child
+should say, so a child's word that is close to the target is recognized as
+that word, and other words come back as "couldn't understand". It downloads
+about 40 MB the first time a speaking exercise opens, then works offline.
+**⚙️ Settings → Listening** can switch to the browser's own recognizer
+instead (needs internet).
 
-| | Reads aloud | Listens to the child |
-|---|---|---|
-| Chrome / Edge (desktop, Android) | ✅ | ✅ (needs internet) |
-| Safari (Mac, iPhone, iPad) | ✅ | ✅ |
-| Firefox | ✅ | ❌ (a grown-up marks the speaking instead) |
+| | Reads aloud | Offline listening | Browser listening |
+|---|---|---|---|
+| Chrome / Edge (desktop, Android) | ✅ | ✅ | ✅ (needs internet) |
+| Safari (Mac, iPhone, iPad) | ✅ | ✅ | ✅ |
+| Firefox | ✅ | ✅ | ❌ |
 
 The microphone only works on `https://` or `localhost`, so serve the folder
 instead of opening `index.html` as a file:
@@ -76,7 +83,7 @@ python3 -m http.server 8000     # then open http://localhost:8000
 To put it online for free, turn on **GitHub Pages** for this repository
 (Settings → Pages → deploy from the branch, folder `/`). Once it has been opened,
 the app works offline and can be installed on a tablet or phone ("Add to Home
-Screen"). Listening still needs an internet connection in Chrome.
+Screen").
 
 ## For developers
 
@@ -85,12 +92,15 @@ index.html, css/styles.css
 js/app.js          screens, navigation, progress tracker, settings
 js/runner.js       question-card exercises (checking, retries, scoring)
 js/screens.js      words, stories, dialogues, pronunciation, writing, grown-up scoring
-js/speech.js       text-to-speech and speech recognition
+js/speech.js       text-to-speech, and chooses the speech recognizer
+js/offline-speech.js  offline speech recognition (Vosk) with the expected words
 js/scoring.js      pronunciation, reading and answer checking
 js/storage.js      auto-saving progress store
 js/content/        the book: one file per unit (begin, starter, ch01–ch10, cp1–cp3, final)
 assets/img/        pictures from the book
 sw.js              offline support
+vendor/vosk-browser/  the offline recognizer library (Apache-2.0)
+models/            the English speech model (Apache-2.0)
 ```
 
 To fix or change the book's content, edit the file in `js/content/`. Keep the
@@ -103,6 +113,14 @@ npm run precache       # run after adding or changing files (offline file list)
 
 The content test checks every id and picture, grades every exercise with its
 answer-key answer, and checks the review totals against the book.
+
+The speech model is downloaded by the **Fetch offline speech model** workflow
+(`.github/workflows/fetch-speech-model.yml`), which saves it to `models/`.
+`tools/check-vocabulary.py` lists words in the book the model doesn't know;
+each needs an entry in `SPOKEN_FORMS` in `js/offline-speech.js`.
+
+Speech recognition: vosk-browser by Ciaran O'Reilly and the Vosk English model
+by Alpha Cephei, both licensed Apache-2.0.
 
 Pictures: Twemoji icons (© Twitter, Inc. and other contributors, licensed
 CC-BY 4.0) and drawings made for the book.

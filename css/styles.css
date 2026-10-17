@@ -413,3 +413,6 @@ td { cursor: pointer; }
 .say-line.reading { background: #f0f6ff; border-left: 5px solid var(--primary); border-radius: 10px; padding: 0.7rem 0.9rem; font-size: 1.05rem; }
 .pic-hero { width: 128px; height: 128px; object-fit: contain; }
 .pic-group.pic-hero { width: auto; height: auto; }
+.offline-banner .bar { margin-top: 0.4rem; }
+.settings label.check { flex-wrap: nowrap; align-items: flex-start; }
+.settings label.check input { flex: none; margin-top: 0.2rem; }

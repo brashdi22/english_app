@@ -1,10 +1,25 @@
-// Text-to-speech (the app reads words aloud) and speech recognition
-// (the app listens to the child) using the browser's Web Speech API.
+// Text-to-speech (the app reads words aloud) with the browser's Web Speech
+// API, and speech recognition (the app listens to the child) either offline
+// on the device (Vosk, the default) or with the browser's online recognizer.
+
+import * as offline from './offline-speech.js';
 
 const Recognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
 
 export const canSpeak = 'speechSynthesis' in globalThis;
-export const canListen = Boolean(Recognition);
+export const canListen = Boolean(Recognition) || offline.supported;
+export const canListenOffline = offline.supported;
+export const canListenOnline = Boolean(Recognition);
+export const offlineStatus = offline.status;
+export const onOfflineStatus = offline.onStatus;
+
+// Which recognizer to use: 'offline' unless the grown-up chose the browser's
+// one in Settings, or the device can't run the offline one.
+export function engine(settings = {}) {
+  if (settings.listenEngine === 'browser' && Recognition) return 'browser';
+  if (offline.supported) return 'offline';
+  return Recognition ? 'browser' : 'none';
+}
 
 let voices = [];
 function refreshVoices() {
@@ -77,7 +92,12 @@ let micPrepared = false;
 
 // Asks for microphone permission before the first tap on 🎤, so the
 // permission prompt doesn't swallow the child's first try.
-export function prepareMicrophone() {
+export function prepareMicrophone(settings) {
+  if (engine(settings) === 'offline') {
+    // Start getting the offline recognizer ready while the child looks.
+    offline.load().catch(() => {});
+    return;
+  }
   if (micPrepared || !canListen || !navigator.mediaDevices?.getUserMedia) return;
   micPrepared = true;
   navigator.mediaDevices.getUserMedia({ audio: true })
@@ -92,7 +112,25 @@ const READY_FALLBACK_MS = 1200;
 // an Error whose `code` is the recognizer error and `message` is kid-friendly.
 // `onReady` is called when the microphone is really recording: only then
 // should the child be told to speak, or the start of the word is lost.
-export function listen({ lang = 'en-US', timeoutMs = 7000, onReady = () => {} } = {}) {
+// Turns the microphone off when the child leaves a speaking exercise.
+export function releaseMicrophone() {
+  offline.closeMic();
+}
+
+// Listens once with the chosen recognizer. `expected` lists the words or
+// sentences the child should say; the offline recognizer listens for those.
+export function listen({ settings = {}, expected = [], mode = 'word', ...opts } = {}) {
+  if (engine(settings) === 'offline') {
+    return offline.listen({ expected, mode, ...opts }).catch((err) => {
+      // A device that can't run the offline recognizer falls back once.
+      if (err.code === 'engine' && Recognition) return browserListen({ lang: settings.accent, ...opts });
+      throw err;
+    });
+  }
+  return browserListen({ lang: settings.accent, ...opts });
+}
+
+function browserListen({ lang = 'en-US', timeoutMs = 7000, onReady = () => {} } = {}) {
   return new Promise((resolve, reject) => {
     if (!Recognition) {
       const err = new Error('Listening is not supported in this browser. Try Chrome, Edge or Safari.');
@@ -173,6 +211,7 @@ export function listen({ lang = 'en-US', timeoutMs = 7000, onReady = () => {} } 
 }
 
 export function stopListening() {
+  offline.stop();
   if (active) {
     try { active.abort(); } catch { /* already stopped */ }
     active = null;
