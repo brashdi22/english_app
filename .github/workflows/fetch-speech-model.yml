@@ -1,0 +1,51 @@
+# Downloads the small English Vosk model (Apache-2.0, about 40 MB) used for
+# offline listening, repackages it as the .tar.gz that vosk-browser expects,
+# and commits it to models/ so GitHub Pages serves it with the app.
+name: Fetch offline speech model
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/fetch-speech-model.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download and repackage the model
+        id: model
+        run: |
+          set -euo pipefail
+          NAME=vosk-model-small-en-us-0.15
+          OUT=models/$NAME.tar.gz
+          if [ -f "$OUT" ]; then
+            echo "Model already in the repository."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          curl -fsSL -o model.zip "https://alphacephei.com/vosk/models/$NAME.zip"
+          sha256sum model.zip
+          unzip -q model.zip
+          mkdir -p models
+          tar -czf "$OUT" "$NAME"
+          ls -la models
+          # The word list lets the app's tests check that every word in the
+          # book is one the model knows.
+          cut -d' ' -f1 "$NAME/graph/words.txt" > models/words.txt
+          rm -rf model.zip "$NAME"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit the model
+        if: steps.model.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898333+github-actions[bot]@users.noreply.github.com"
+          git add models
+          git commit -m "Add offline English speech model (vosk-model-small-en-us-0.15)"
+          git push
