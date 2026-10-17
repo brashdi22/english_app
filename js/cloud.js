@@ -51,7 +51,7 @@ const config = useLocalOnly() ? null : (emulator ? EMULATOR_CONFIG : FIREBASE_CO
 
 export const configured = Boolean(config);
 
-const KID_EMAIL_DOMAIN = 'kids.example.com';
+export const KID_EMAIL_DOMAIN = 'kids.example.com';
 // Firebase needs passwords of 6+ characters; a child's PIN is wrapped.
 export const kidPassword = (pin) => `greenhill:${pin}`;
 export const kidEmail = (username) => `${normalizeUsername(username)}@${KID_EMAIL_DOMAIN}`;
@@ -169,9 +169,18 @@ function userFromData(uid, d) {
   };
 }
 
-export async function watchUser(uid, callback) {
+// callback(user) with the account, or null once the server says there is
+// none (a "not saved on this device" answer from the device cache is skipped).
+export async function watchUser(uid, callback, onError) {
   const { fb, db } = await init();
-  return fb.onSnapshot(ref(fb, db, `users/${uid}`), (snap) => callback(snap.exists() ? userFromData(uid, snap.data()) : null));
+  let last;
+  return fb.onSnapshot(ref(fb, db, `users/${uid}`), { includeMetadataChanges: true }, (snap) => {
+    if (!snap.exists() && snap.metadata.fromCache) return;
+    const key = snap.exists() ? JSON.stringify(snap.data()) : null;
+    if (key === last) return;
+    last = key;
+    callback(snap.exists() ? userFromData(uid, snap.data()) : null);
+  }, onError);
 }
 
 export async function saveUser(uid, data) {

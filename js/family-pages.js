@@ -17,8 +17,49 @@ export function familyPages(ctx) {
   // ---------------------------------------------------------------- loading
   function loadingPage() {
     renderHeader();
-    add(main, h('section', { class: 'card center' }, h('p', {}, '⏳ Getting ready…'),
-      cloud && family.signedIn() ? h('button', { type: 'button', class: 'btn small ghost', onclick: () => family.signOut() }, 'Log out') : null));
+    const slow = h('p', { class: 'muted', hidden: true }, 'This is taking a long time. Please check the internet connection.');
+    const card = h('section', { class: 'card center' }, h('p', {}, '⏳ Getting ready…'), slow,
+      h('div', { class: 'controls' },
+        h('button', { type: 'button', class: 'btn small ghost', onclick: () => location.reload() }, 'Try again'),
+        cloud && family.loggedIn() ? h('button', { type: 'button', class: 'btn small ghost', onclick: () => family.signOut() }, 'Log out') : null));
+    card.querySelector('.controls').hidden = true;
+    add(main, card);
+    setTimeout(() => { slow.hidden = false; card.querySelector('.controls').hidden = false; }, 12000);
+  }
+
+  // Logged in, but the account's details are missing or could not be loaded.
+  function accountProblemPage() {
+    renderHeader();
+    const status = formStatus();
+    const logOut = h('button', { type: 'button', class: 'btn ghost', onclick: () => family.signOut() }, 'Log out');
+    if (family.accountProblem === 'error') {
+      add(main, h('section', { class: 'card center' },
+        h('h2', {}, 'Your account could not be opened'),
+        h('p', {}, family.problemMessage || 'Something went wrong.'),
+        h('p', { class: 'muted' }, 'Please check the internet connection and try again.'),
+        h('div', { class: 'controls' }, h('button', { type: 'button', class: 'btn primary', onclick: () => location.reload() }, 'Try again'), logOut)));
+      return;
+    }
+    const kid = family.isKidLogin();
+    const fix = h('button', {
+      type: 'button', class: 'btn primary',
+      onclick: async () => {
+        fix.disabled = true;
+        status.textContent = 'Setting up…';
+        try {
+          await family.finishAccount();
+        } catch (err) {
+          status.textContent = family.errorMessage(err);
+          fix.disabled = false;
+        }
+      },
+    }, kid ? 'Finish my account' : 'Make it a parent account');
+    add(main, h('section', { class: 'card center' },
+      h('h2', {}, kid ? 'Your account is not finished' : 'This account needs setting up'),
+      h('p', {}, kid
+        ? `The account "${family.loginName()}" was not finished when it was made. Tap below to finish it.`
+        : `${family.loginName()} was made with an older version of the app. Make it a parent account to get a family ID, or log out.`),
+      h('div', { class: 'controls' }, fix, logOut), status));
   }
 
   // ---------------------------------------------------- shared form helpers
@@ -781,7 +822,7 @@ export function familyPages(ctx) {
   }
 
   return {
-    loadingPage, welcomePage, pickerPage, parentPage, childProgressPage, scoreboardPage, tracker,
+    loadingPage, accountProblemPage, welcomePage, pickerPage, parentPage, childProgressPage, scoreboardPage, tracker,
     kidFamilyCard, kidPictureCard,
   };
 }

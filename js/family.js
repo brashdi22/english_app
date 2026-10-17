@@ -27,6 +27,14 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
 
   // Cloud state.
   let account = null; // { uid, role, username | email, avatar, familyCode, ... }
+  let authUser = null; // { uid, email } of the signed-in login
+  // Signed in, but the account can't be used: 'missing' (no account details,
+  // e.g. made with an older version of the app) or 'error' (couldn't load).
+  let accountProblem = null;
+  let problemMessage = '';
+  let localOpened = false; // the device's saved copy of this account is open
+  let creating = 0; // sign-ups in progress (their details are being saved)
+  let missingWhileCreating = false;
   let authKnown = mode === 'local';
   let accountLoaded = mode === 'local';
   let unsubs = [];
@@ -51,7 +59,10 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
     await cloud.onAuth(async (user) => {
       stopAll();
       account = null;
+      authUser = user;
+      accountProblem = null;
       accountLoaded = false;
+      localOpened = false;
       authKnown = true;
       if (!user) {
         store.switchKey(SIGNED_OUT_KEY);
@@ -61,19 +72,73 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
       }
       update();
       unsubs.push(await cloud.watchUser(user.uid, (u) => {
-        if (!u) return; // being created right now
+        if (!u || !u.role) {
+          if (creating) { missingWhileCreating = true; return; } // being saved right now
+          if (account) return;
+          return setProblem('missing');
+        }
         const familyChanged = account?.familyCode !== u.familyCode || !account;
         account = { ...u, email: user.email };
-        if (!accountLoaded) {
-          accountLoaded = true;
+        accountProblem = null;
+        accountLoaded = true;
+        if (!localOpened) {
+          localOpened = true;
           openLocalCopy();
         }
         if (familyChanged) watchFamily();
         if (u.role === 'kid') applyKidAccount(u);
         update();
+      }, (err) => {
+        warn(err);
+        if (!account) setProblem('error', cloud.errorMessage(err));
       }));
     });
   }
+
+  function setProblem(kind, message = '') {
+    accountProblem = kind;
+    problemMessage = message;
+    accountLoaded = true;
+    update();
+  }
+
+  // While an account is being created its details are not there yet.
+  async function whileCreating(fn) {
+    creating++;
+    try {
+      return await fn();
+    } finally {
+      creating--;
+      if (!creating && missingWhileCreating && !account && authUser) setProblem('missing');
+      missingWhileCreating = false;
+    }
+  }
+
+  // Saves the details of a child's account (the login already exists).
+  async function setUpKid(uid, { username, avatar = null }) {
+    const now = new Date().toISOString();
+    await cloud.saveUser(uid, { role: 'kid', username, avatar, familyCode: null, settings: { ...DEFAULT_SETTINGS }, createdAt: now, updatedAt: now });
+  }
+
+  // Saves a parent account and makes its family.
+  async function setUpParent(uid, email) {
+    const now = new Date().toISOString();
+    await cloud.saveUser(uid, { role: 'parent', email, familyCode: null, createdAt: now, updatedAt: now });
+    const code = await cloud.createFamily(uid, await hashParentPassword(DEFAULT_PARENT_PASSWORD));
+    await cloud.saveUser(uid, { familyCode: code });
+    return code;
+  }
+
+  // Fixes a login that has no account details (see accountProblem).
+  async function finishAccount() {
+    if (!authUser) return;
+    const kidName = kidUsername(authUser.email);
+    await whileCreating(() => (kidName
+      ? setUpKid(authUser.uid, { username: kidName, avatar: recentKids().find((k) => k.username === kidName)?.avatar || null })
+      : setUpParent(authUser.uid, authUser.email)));
+  }
+
+  const kidUsername = (email) => (email && email.endsWith(`@${cloud.KID_EMAIL_DOMAIN}`) ? email.slice(0, -cloud.KID_EMAIL_DOMAIN.length - 1) : null);
 
   function stopAll() {
     unsubs.forEach((u) => u());
@@ -250,9 +315,11 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
   async function signUpKid({ username, pin, avatar, code }) {
     const name = cloud.normalizeUsername(username);
     const wanted = code ? cloud.normalizeCode(code) : null;
-    const uid = await cloud.signUpKid(name, pin);
-    const now = new Date().toISOString();
-    await cloud.saveUser(uid, { role: 'kid', username: name, avatar, familyCode: null, settings: { ...DEFAULT_SETTINGS }, createdAt: now, updatedAt: now });
+    const uid = await whileCreating(async () => {
+      const id = await cloud.signUpKid(name, pin);
+      await setUpKid(id, { username: name, avatar });
+      return id;
+    });
     rememberKid(name, avatar);
     if (wanted) {
       try {
@@ -306,13 +373,8 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
   }
 
   // -------------------------------------------------------- parent accounts
-  async function signUpParent(email, password) {
-    const uid = await cloud.signUpParent(email, password);
-    const now = new Date().toISOString();
-    await cloud.saveUser(uid, { role: 'parent', email: email.trim(), familyCode: null, createdAt: now, updatedAt: now });
-    const code = await cloud.createFamily(uid, await hashParentPassword(DEFAULT_PARENT_PASSWORD));
-    await cloud.saveUser(uid, { familyCode: code });
-    return code;
+  function signUpParent(email, password) {
+    return whileCreating(async () => setUpParent(await cloud.signUpParent(email, password), email.trim()));
   }
 
   const signInParent = (email, password) => cloud.signInParent(email, password);
@@ -397,8 +459,15 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
     flush,
     role,
     get account() { return account; },
-    get ready() { return authKnown && accountLoaded && (mode === 'local' || !account || Boolean(account.role)); },
+    get ready() { return authKnown && accountLoaded; },
     signedIn: () => mode === 'local' || Boolean(account),
+    // Logged in (even if the account can't be used yet).
+    loggedIn: () => Boolean(authUser),
+    get accountProblem() { return accountProblem; },
+    get problemMessage() { return problemMessage; },
+    isKidLogin: () => Boolean(kidUsername(authUser?.email)),
+    loginName: () => kidUsername(authUser?.email) || authUser?.email || '',
+    finishAccount,
     familyCode,
     membership,
     get requests() { return requests.filter((r) => r.status === 'pending'); },

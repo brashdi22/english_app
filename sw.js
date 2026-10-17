@@ -6,7 +6,8 @@ importScripts('precache-manifest.js');
 const CACHE = `greenhill-${self.PRECACHE_VERSION}`;
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(self.PRECACHE_FILES)));
+  // 'reload' skips the browser's own cache, so a new version never mixes in old files.
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(self.PRECACHE_FILES.map((f) => new Request(f, { cache: 'reload' })))));
   self.skipWaiting();
 });
 

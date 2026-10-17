@@ -241,6 +241,7 @@ function route() {
   clear(main);
   shownPage = page || 'home';
   if (!family.ready) { shownPage = 'loading'; return pages.loadingPage(); }
+  if (family.accountProblem) { shownPage = 'accountfix'; return pages.accountProblemPage(); }
   if (!family.signedIn()) { shownPage = 'signin'; return pages.welcomePage(); }
   if (page === 'scoreboard') return pages.scoreboardPage();
   // A parent account only has the parent area.
@@ -276,9 +277,11 @@ const LIVE_PAGES = new Set(['loading', 'signin', 'picker', 'home', 'scoreboard',
 function liveUpdate() {
   clearTimeout(liveTimer);
   liveTimer = setTimeout(() => {
-    const wasWaiting = shownPage === 'loading' || shownPage === 'signin';
-    const nowWaiting = !family.ready || !family.signedIn() || (family.role() === 'kid' && !store.profile());
-    if (wasWaiting !== nowWaiting) return route();
+    const WAITING = ['loading', 'signin', 'accountfix'];
+    const was = WAITING.includes(shownPage) ? shownPage : null;
+    const now = !family.ready ? 'loading' : family.accountProblem ? 'accountfix' : !family.signedIn() ? 'signin'
+      : (family.role() === 'kid' && !store.profile()) ? 'loading' : null;
+    if (was !== now) return route();
     if (shownPage === 'signin') return;
     if (!LIVE_PAGES.has(shownPage) || document.querySelector('dialog[open]')) return;
     if (main.contains(document.activeElement) && document.activeElement.matches('input, textarea, select')) return;
