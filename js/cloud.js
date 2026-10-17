@@ -53,7 +53,7 @@ export const configured = Boolean(config);
 
 const KID_EMAIL_DOMAIN = 'kids.example.com';
 // Firebase needs passwords of 6+ characters; a child's PIN is wrapped.
-const kidPassword = (pin) => `greenhill:${pin}`;
+export const kidPassword = (pin) => `greenhill:${pin}`;
 export const kidEmail = (username) => `${normalizeUsername(username)}@${KID_EMAIL_DOMAIN}`;
 export const normalizeUsername = (name) => String(name).trim().toLowerCase();
 export const validUsername = (name) => /^[a-z0-9][a-z0-9_.-]{2,19}$/.test(normalizeUsername(name));

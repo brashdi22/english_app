@@ -81,8 +81,9 @@ The app works in one of two ways.
   Passwords and PINs are stored only as hashes. PINs are short, so they keep
   brothers and sisters apart rather than being strong security; choose a
   longer PIN if that matters to you.
-- A forgotten child PIN cannot be reset by the parent (that would need a
-  server). The child can create a new account and join the family again.
+- **Forgotten passwords:** a parent can get a reset email with **Forgot
+  password?** on the parent log-in. A forgotten child PIN (or any password)
+  can be reset by the app's owner with the [admin tool](#admin-tool).
 
 ### Without accounts (until Firebase is set up)
 
@@ -113,6 +114,37 @@ children of that device.
 
 Then open the app, choose **I'm a parent → Create a parent account**, and
 give the family ID to the children.
+
+### Admin tool
+
+`tools/admin.mjs` runs on your own computer and can change any account. It
+needs [Node.js](https://nodejs.org) and a **service account key**.
+
+1. In the Firebase console: **Project settings (⚙️) → Service accounts →
+   Generate new private key**. A `.json` file downloads.
+2. Move it to a folder **outside this project** (e.g. your Documents folder).
+   This key can change every account: never commit, upload or share it. If
+   it leaks, delete it in Google Cloud console → IAM → Service accounts →
+   Keys and make a new one.
+3. In this project's folder, run `npm install` once.
+
+Then:
+
+```sh
+node tools/admin.mjs list --key ~/Documents/greenhill-key.json
+node tools/admin.mjs kid-pin sami 4321 --key ~/Documents/greenhill-key.json
+node tools/admin.mjs parent-password mum@example.com newpassword123 --key ~/Documents/greenhill-key.json
+node tools/admin.mjs grownup-password ABCD2345 newgrownuppass --key ~/Documents/greenhill-key.json
+```
+
+- `list`: every child (username and family) and parent (email and family ID).
+- `kid-pin <username> <PIN>`: a new PIN of 4 to 8 numbers.
+- `parent-password <email> <password>`: a new parent log-in password.
+- `grownup-password <family ID or parent email> <password>`: the family's
+  grown-up scoring password (if the parent forgot it).
+
+After a PIN or password change, devices that are still logged in to that
+account are logged out within an hour.
 
 ## Running the app
 
@@ -168,6 +200,7 @@ models/            the English speech model (Apache-2.0)
 vendor/firebase/   Firebase JS SDK, bundled (Apache-2.0)
 firestore.rules    who may read and write family data
 firebase.json      settings for the local Firebase emulator (testing)
+tools/admin.mjs    admin tool: reset PINs and passwords, list accounts
 ```
 
 To fix or change the book's content, edit the file in `js/content/`. Keep the
@@ -185,7 +218,8 @@ To try accounts on your computer without a Firebase project, run the
 Firebase emulator (`npx firebase-tools emulators:start --only auth,firestore
 --project demo-greenhill`) and open `http://localhost:8000/?emulator`.
 With the emulator running, `npm install` then `npm run test:emulator` checks
-the security rules (who can read and write what).
+the security rules (who can read and write what) and the admin tool
+(`node tools/admin.mjs … --emulator` uses the emulator too).
 
 The speech model is downloaded by the **Fetch offline speech model** workflow
 (`.github/workflows/fetch-speech-model.yml`), which saves it to `models/`.

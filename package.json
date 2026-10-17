@@ -8,10 +8,11 @@
     "start": "python3 -m http.server 8000",
     "test": "node --test tests/*.test.mjs && node tools/gen-precache.mjs --check",
     "precache": "node tools/gen-precache.mjs",
-    "test:emulator": "node --test tests-emulator/*.test.mjs"
+    "test:emulator": "node --test --test-concurrency=1 tests-emulator/*.test.mjs"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "6.0.0",
-    "firebase": "13.0.0"
+    "firebase": "13.0.0",
+    "firebase-admin": "13.10.0"
   }
 }
