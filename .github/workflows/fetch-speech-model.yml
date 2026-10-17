@@ -35,9 +35,7 @@ jobs:
           mkdir -p models
           tar -czf "$OUT" "$NAME"
           ls -la models
-          # The word list lets the app's tests check that every word in the
-          # book is one the model knows.
-          cut -d' ' -f1 "$NAME/graph/words.txt" > models/words.txt
+          tar -tzf "$OUT"
           rm -rf model.zip "$NAME"
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
