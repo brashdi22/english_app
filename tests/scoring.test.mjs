@@ -86,3 +86,15 @@ test('stars follow the book bands', () => {
   assert.equal(starsForScore(1), 3);
   assert.equal(starsForScore(0.4), 0);
 });
+
+test('pronunciation forgives near-misses a recognizer makes with learners', () => {
+  // Same consonant sounds, different vowel or a voiced/unvoiced mix-up.
+  assert.ok(scorePronunciation('cat', ['kat']).stars >= 2);
+  assert.ok(scorePronunciation('pen', ['ben']).stars >= 2);
+  assert.ok(scorePronunciation('three', ['tree']).stars >= 2);
+  assert.ok(scorePronunciation('Greenhill', ['green hill']).stars >= 2);
+  assert.ok(scorePronunciation('umbrella', ['umbrela']).stars >= 2);
+  // A different word still gets no stars.
+  assert.equal(scorePronunciation('apple', ['orange']).stars, 0);
+  assert.equal(scorePronunciation('school', ['banana']).stars, 0);
+});

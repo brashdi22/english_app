@@ -358,6 +358,7 @@ function activityPage(id) {
   const body = h('div', { class: 'act-body' });
   add(wrap, body);
   add(main, wrap);
+  if (['words', 'speak', 'story', 'dialogue', 'ask'].includes(act.type)) speech.prepareMicrophone();
   if (isRunnerType(act.type)) runActivity(body, act, env);
   else SCREENS[act.type](body, act, env);
   if (store.settings().autoSpeak && !['story', 'speak'].includes(act.type)) setTimeout(() => speak(instruction), 300);
@@ -499,9 +500,9 @@ function settingsPage() {
     speech.canListen ? h('button', {
       type: 'button', class: 'btn ghost',
       onclick: async () => {
-        micStatus.textContent = 'Say "hello"…';
+        micStatus.textContent = 'Wait…';
         try {
-          const { alternatives } = await env.listen();
+          const { alternatives } = await env.listen({ onReady: () => { micStatus.textContent = 'Say "hello" now!'; } });
           micStatus.textContent = `✓ I heard: "${alternatives[0]}"`;
         } catch (err) {
           micStatus.textContent = err.message;

@@ -62,14 +62,19 @@ export function similarity(a, b) {
 }
 
 // A small, forgiving sound key: drops vowels after the first letter and
-// merges letters that sound alike, so "kat" and "cat" compare equal.
+// merges letters that sound alike, so "kat" and "cat" compare equal. Pairs
+// learners often mix up (b/p, d/t, g/k, v/f, th) are merged too.
 export function soundKey(word) {
   const w = word
     .replace(/ph/g, 'f')
+    .replace(/th/g, 't')
     .replace(/ck/g, 'k')
-    .replace(/[cq]/g, 'k')
+    .replace(/[cqg]/g, 'k')
     .replace(/x/g, 'ks')
     .replace(/z/g, 's')
+    .replace(/b/g, 'p')
+    .replace(/d/g, 't')
+    .replace(/v/g, 'f')
     .replace(/[wh](?=[^aeiou]|$)/g, '');
   if (!w) return '';
   const rest = w.slice(1).replace(/[aeiouy]/g, '').replace(/(.)\1+/g, '$1');
@@ -93,15 +98,25 @@ function scorePhrase(heard, form) {
   if (formWords.length === 1 && heardWords.includes(form)) return 1;
   if (formWords.length > 1 && ` ${heard} `.includes(` ${form} `)) return 1;
 
-  let best = similarity(heard, form);
+  // Recognizers sometimes split one word in two ("green hill").
+  let best = Math.max(similarity(heard, form), similarity(heard.replace(/ /g, ''), form.replace(/ /g, '')));
   if (formWords.length === 1) {
     for (const w of heardWords) {
-      let s = similarity(w, form);
-      if (s < 0.85 && soundKey(w) === soundKey(form)) s = 0.85;
-      best = Math.max(best, s);
+      best = Math.max(best, closeness(w, form));
     }
   }
   return best;
+}
+
+// How close one heard word is to the target word, forgiving the small
+// differences a recognizer makes with a child's or a learner's accent.
+function closeness(heard, target) {
+  let score = similarity(heard, target);
+  const a = soundKey(heard);
+  const b = soundKey(target);
+  if (a === b) score = Math.max(score, 0.85);
+  else if (target.length >= 4 && similarity(a, b) >= 0.66) score = Math.max(score, 0.75);
+  return score;
 }
 
 // alternatives: list of transcripts from the recognizer (best guess first).

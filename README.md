@@ -11,8 +11,10 @@ and the Certificate. The pictures come from the book.
 - **New Words**: picture cards with the meaning and example sentence. Tap a
   card and the app reads the word and the example aloud.
 - **Pronunciation**: the app says each word (🔊, or 🐢 for slower), then the
-  child taps 🎤 and says it. The app listens and gives 0–3 stars and shows
-  what it heard. This is used for the New Words, the Sound Spots, tricky
+  child taps 🎤 and says it. The button turns orange ("Wait…") while the
+  microphone switches on, then green ("Speak now!"). The app listens, gives
+  0–3 stars and shows what it heard. In practice, one star counts as said;
+  in tests (Let's Begin, Starter Review) two stars are needed. This is used for the New Words, the Sound Spots, tricky
   words, the alphabet and the short vowel lines.
 - **Stories**: *Listen* reads the story aloud and highlights each line.
   *I read it aloud* listens while the child reads each line, colours missed

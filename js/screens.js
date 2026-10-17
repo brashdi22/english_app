@@ -25,6 +25,16 @@ function doneButton(env, act, text = "I'm done ✓") {
   }, text);
 }
 
+// A word said in practice counts with one star: the browser's recognizer is
+// made for adults, so children's words often come back slightly wrong.
+const PRACTICE_PASS = 1;
+
+// The microphone is really recording now: tell the child to speak.
+function micReady(btn, status, text) {
+  btn.classList.replace('starting', 'listening');
+  status.textContent = text;
+}
+
 // Stars for a whole sentence read aloud.
 function sentenceStars(ratio) {
   if (ratio >= 0.85) return 3;
@@ -79,23 +89,23 @@ export function wordsScreen(root, act, env) {
             type: 'button', class: 'mic-btn small', 'aria-label': `Say ${w.word}`,
             onclick: async (e) => {
               const btn = e.currentTarget;
-              btn.classList.add('listening');
-              status.textContent = 'Listening… say the word!';
+              btn.classList.add('starting');
+              status.textContent = 'Wait…';
               try {
-                const { alternatives } = await env.listen();
+                const { alternatives } = await env.listen({ onReady: () => micReady(btn, status, 'Say the word now!') });
                 const result = scorePronunciation(w.word, alternatives, w.accept);
-                status.textContent = result.stars >= 2 ? `✓ I heard "${result.heard}"` : `I heard "${result.heard}". Try again!`;
+                status.textContent = result.stars >= PRACTICE_PASS ? `✓ I heard "${result.heard}"` : `I heard "${result.heard}". Try again!`;
                 if (result.stars > (best[w.word] || 0)) {
                   best[w.word] = result.stars;
                   env.store.updateActivity(act.id, (r) => { r.data.stars = { ...best }; });
                   clear(starBox).append(stars(result.stars));
                 }
-                env.sound(result.stars >= 2 ? 'right' : 'wrong');
+                env.sound(result.stars >= PRACTICE_PASS ? 'right' : 'wrong');
                 markHeard(w.word);
               } catch (err) {
                 status.textContent = err.message;
               } finally {
-                btn.classList.remove('listening');
+                btn.classList.remove('starting', 'listening');
               }
             },
           }, '🎤') : null,
@@ -177,6 +187,8 @@ const plain = (t) => String(t).replace(/\*\*/g, '');
 export function speakScreen(root, act, env) {
   const items = act.items;
   const repeat = act.mode !== 'read';
+  // Practice passes with one star; tests ask for a clearer two.
+  const pass = act.review ? 2 : PRACTICE_PASS;
   let rec = env.store.activityProgress(act.id);
   let index = rec?.completed ? 0 : Math.min(rec?.index ?? 0, items.length - 1);
   let selfCheck = !env.canListen;
@@ -234,11 +246,11 @@ export function speakScreen(root, act, env) {
     }
 
     mic.addEventListener('click', async () => {
-      mic.classList.add('listening');
+      mic.classList.add('starting');
       mic.disabled = true;
-      status.textContent = 'Listening… speak now!';
+      status.textContent = 'Wait…';
       try {
-        const { alternatives } = await env.listen();
+        const { alternatives } = await env.listen({ onReady: () => micReady(mic, status, repeat ? 'Speak now!' : 'Read it now!') });
         const result = scorePronunciation(text, alternatives, item.accept);
         let got = result.stars;
         if (text.trim().includes(' ')) {
@@ -247,11 +259,13 @@ export function speakScreen(root, act, env) {
           got = Math.max(got, sentenceStars((cmp.words.length - cmp.mistakes) / cmp.words.length));
         }
         record(got, result.heard);
-        const msg = ['Let’s try again. Listen first!', 'Good try! Say it again.', 'Very good!', 'Perfect!'][got];
+        const msg = got >= pass
+          ? ['', 'Good! Try again for more stars.', 'Very good!', 'Perfect!'][got]
+          : ['Let’s try again. Listen first!', 'Good try! Say it again.'][got];
         status.textContent = `${msg}  I heard: "${result.heard}"`;
-        env.sound(got >= 2 ? 'right' : 'wrong');
+        env.sound(got >= pass ? 'right' : 'wrong');
         await env.speak(msg.replace(/[!.]/g, ''), { quiet: true });
-        if (got < 2 && repeat) await env.speak(item.say || text);
+        if (got < pass && repeat) await env.speak(item.say || text);
       } catch (err) {
         if (err.code === 'aborted') return;
         status.textContent = err.message;
@@ -260,7 +274,7 @@ export function speakScreen(root, act, env) {
           mic.replaceWith(selfCheckRow());
         }
       } finally {
-        mic.classList.remove('listening');
+        mic.classList.remove('starting', 'listening');
         mic.disabled = false;
       }
     });
@@ -284,7 +298,7 @@ export function speakScreen(root, act, env) {
 
   function finish() {
     const list = saved();
-    const good = items.filter((_, i) => (list[i]?.stars || 0) >= 2).length;
+    const good = items.filter((_, i) => (list[i]?.stars || 0) >= pass).length;
     let earned = good;
     let possible = items.length;
     if (act.pointsRule) {
@@ -397,11 +411,14 @@ export function storyScreen(root, act, env) {
       const { el, line, words } = lineEls[i];
       el.classList.add('current');
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      status.textContent = '🎤 Read this line aloud…';
       let result = null;
       for (let attempt = 0; attempt < 3 && !result && !stopFlag; attempt++) {
+        status.textContent = 'Wait…';
         try {
-          const { alternatives } = await env.listen({ timeoutMs: 6000 + line.text.length * 120 });
+          const { alternatives } = await env.listen({
+            timeoutMs: 6000 + line.text.length * 120,
+            onReady: () => { status.textContent = '🎤 Read this line aloud now!'; },
+          });
           const best = alternatives
             .map((alt) => compareReading(line.text, alt))
             .sort((a, b) => a.mistakes - b.mistakes)[0];
@@ -505,9 +522,12 @@ export function dialogueScreen(root, act, env) {
       if (line.speaker !== role) {
         await env.speak(line.text, { pitch: pitchFor(line.speaker) });
       } else if (env.canListen) {
-        status.textContent = `🎤 Your turn, ${role}! Say your line.`;
+        status.textContent = `Your turn, ${role}! Wait…`;
         try {
-          const { alternatives } = await env.listen({ timeoutMs: 6000 + line.text.length * 120 });
+          const { alternatives } = await env.listen({
+            timeoutMs: 6000 + line.text.length * 120,
+            onReady: () => { status.textContent = `🎤 Say your line now, ${role}!`; },
+          });
           const cmp = alternatives.map((a) => compareReading(line.text, a)).sort((a, b) => a.mistakes - b.mistakes)[0];
           const got = sentenceStars((cmp.words.length - cmp.mistakes) / cmp.words.length);
           results.push(got);
@@ -721,17 +741,17 @@ export function askScreen(root, act, env) {
       const heard = h('div', { class: 'heard' }, a.text ? `“${a.text}”` : '');
       const mic = h('button', { type: 'button', class: 'mic-btn small', 'aria-label': 'Answer' }, '🎤');
       mic.addEventListener('click', async () => {
-        mic.classList.add('listening');
-        heard.textContent = 'Listening…';
+        mic.classList.add('starting');
+        heard.textContent = 'Wait…';
         try {
-          const { alternatives } = await env.listen({ timeoutMs: 9000 });
+          const { alternatives } = await env.listen({ timeoutMs: 9000, onReady: () => micReady(mic, heard, 'Answer now!') });
           answers[i] = { text: alternatives[0], points: suggest(alternatives[0]) };
           save();
           draw();
         } catch (err) {
           heard.textContent = err.message;
         } finally {
-          mic.classList.remove('listening');
+          mic.classList.remove('starting', 'listening');
         }
       });
       const typed = h('input', { type: 'text', class: 'write-input', placeholder: 'Or type the answer', value: a.text || '' });

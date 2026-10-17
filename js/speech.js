@@ -73,10 +73,26 @@ const ERROR_MESSAGES = {
 };
 
 let active = null;
+let micPrepared = false;
+
+// Asks for microphone permission before the first tap on 🎤, so the
+// permission prompt doesn't swallow the child's first try.
+export function prepareMicrophone() {
+  if (micPrepared || !canListen || !navigator.mediaDevices?.getUserMedia) return;
+  micPrepared = true;
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then((stream) => stream.getTracks().forEach((t) => t.stop()))
+    .catch(() => { micPrepared = false; });
+}
+
+// Browsers that never say when the microphone is on get this long instead.
+const READY_FALLBACK_MS = 1200;
 
 // Listens once and resolves with { alternatives: string[] } or rejects with
 // an Error whose `code` is the recognizer error and `message` is kid-friendly.
-export function listen({ lang = 'en-US', timeoutMs = 7000 } = {}) {
+// `onReady` is called when the microphone is really recording: only then
+// should the child be told to speak, or the start of the word is lost.
+export function listen({ lang = 'en-US', timeoutMs = 7000, onReady = () => {} } = {}) {
   return new Promise((resolve, reject) => {
     if (!Recognition) {
       const err = new Error('Listening is not supported in this browser. Try Chrome, Edge or Safari.');
@@ -88,32 +104,59 @@ export function listen({ lang = 'en-US', timeoutMs = 7000 } = {}) {
     const rec = new Recognition();
     active = rec;
     rec.lang = lang;
-    rec.interimResults = false;
+    // Early guesses are kept: for one short word, browsers often make a guess
+    // and then end without a final result.
+    rec.interimResults = true;
     rec.continuous = false;
     rec.maxAlternatives = 5;
 
     let settled = false;
-    const timer = setTimeout(() => rec.stop(), timeoutMs);
+    let ready = false;
+    let timer = null;
+    const heard = [];
+    let finals = 0;
+    const markReady = () => {
+      if (ready || settled) return;
+      ready = true;
+      // The time limit starts when the child can actually speak.
+      timer = setTimeout(() => rec.stop(), timeoutMs);
+      onReady();
+    };
+    const fallback = setTimeout(markReady, READY_FALLBACK_MS);
     const settle = (fn, value) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(fallback);
       if (active === rec) active = null;
       fn(value);
     };
+    const finish = () => settle(resolve, { alternatives: [...heard] });
 
+    rec.onaudiostart = markReady;
     rec.onresult = (event) => {
-      const result = event.results[0];
-      const alternatives = [];
-      for (let i = 0; i < result.length; i++) alternatives.push(result[i].transcript);
-      settle(resolve, { alternatives });
+      let final = false;
+      for (let r = event.resultIndex || 0; r < event.results.length; r++) {
+        const result = event.results[r];
+        for (let i = 0; i < result.length; i++) {
+          const text = result[i].transcript.trim();
+          // Final guesses go first: they are the browser's best answer.
+          if (text && !heard.includes(text)) {
+            if (result.isFinal) heard.splice(finals++, 0, text); else heard.push(text);
+          }
+        }
+        if (result.isFinal) final = true;
+      }
+      if (final) finish();
     };
     rec.onerror = (event) => {
+      if (heard.length && ['no-speech', 'aborted'].includes(event.error)) return finish();
       const err = new Error(ERROR_MESSAGES[event.error] ?? 'Something went wrong while listening. Please try again.');
       err.code = event.error;
       settle(reject, err);
     };
     rec.onend = () => {
+      if (heard.length) return finish();
       const err = new Error(ERROR_MESSAGES['no-speech']);
       err.code = 'no-speech';
       settle(reject, err);
