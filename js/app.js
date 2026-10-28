@@ -9,6 +9,7 @@ import { activityPoints } from './points.js';
 import * as P from './progress.js';
 import { createFamily } from './family.js';
 import { familyPages } from './family-pages.js';
+import { minutesText, WARN_SECONDS } from './screen-time.js';
 
 const MODEL_MB = 40;
 const AVATARS = ['sam', 'lina', 'ben', 'dina', 'max', 'mrs-green', 'mr-hill', 'ms-rose', 'gran-mona'];
@@ -49,6 +50,23 @@ family = createFamily(store, { onUpdate: () => liveUpdate() });
 addEventListener('pagehide', () => family.flush());
 
 let adultMode = false;
+
+// A child's time left today (when the parent has set a limit).
+const timeEl = h('span', { class: 'time-left', role: 'status' });
+let warnedDay = null;
+function updateTimeLeft() {
+  const t = family.role() === 'kid' ? family.screenTime() : null;
+  timeEl.hidden = !t?.limited;
+  if (!t?.limited) return;
+  timeEl.textContent = `⏳ ${Math.ceil(t.remainingSeconds / 60)} min`;
+  timeEl.title = `Time left today: ${minutesText(t.remainingSeconds)}`;
+  timeEl.classList.toggle('low', t.remainingSeconds <= WARN_SECONDS);
+  const day = new Date().toDateString();
+  if (!t.timeUp && t.remainingSeconds <= WARN_SECONDS && warnedDay !== day) {
+    warnedDay = day;
+    toast(`⏳ ${minutesText(t.remainingSeconds)} left for today.`, 'info');
+  }
+}
 
 // --------------------------------------------------------------- audio fx
 let audioCtx;
@@ -205,6 +223,7 @@ function renderHeader(title) {
     atHome ? h('span', { class: 'brand' }, '📗') : h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Back', onclick: () => backFromHere() }, '⬅'),
     h('h1', { class: 'top-title' }, title || BOOK.title),
     p ? saveEl : null,
+    p ? timeEl : null,
     p ? h('span', { class: 'star-count', title: 'My stars' }, `⭐ ${totalStars()}`) : null,
     adultMode && family.role() !== 'parent' ? h('button', { type: 'button', class: 'icon-btn adult-on', title: 'Grown-up mode on (tap to turn off)', onclick: () => { adultMode = false; route(); } }, '👪') : null,
     ready ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Scoreboard', title: 'Scoreboard', onclick: () => go('#/scoreboard') }, '🏆') : null,
@@ -257,6 +276,7 @@ function route() {
     if (!store.profile()) { shownPage = 'picker'; return pages.pickerPage(); }
   }
   if (!store.profile()) { shownPage = 'loading'; return pages.loadingPage(); }
+  if (family.role() === 'kid' && family.screenTime().timeUp) { shownPage = 'timeup'; return pages.timeUpPage(); }
   switch (page) {
     case 'unit': return unitPage(id);
     case 'act': return activityPage(id);
@@ -278,6 +298,10 @@ const LIVE_PAGES = new Set(['loading', 'signin', 'picker', 'home', 'scoreboard',
 function liveUpdate() {
   clearTimeout(liveTimer);
   liveTimer = setTimeout(() => {
+    updateTimeLeft();
+    // Time's up (or more time was given): change page even in an activity.
+    const timeUp = family.role() === 'kid' && family.screenTime().timeUp;
+    if (timeUp !== (shownPage === 'timeup')) return route();
     const WAITING = ['loading', 'signin', 'accountfix'];
     const was = WAITING.includes(shownPage) ? shownPage : null;
     const now = !family.ready ? 'loading' : family.accountProblem ? 'accountfix' : !family.signedIn() ? 'signin'

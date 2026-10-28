@@ -5,6 +5,7 @@ import { h, add, clear, img, stars, toast, formatTime } from './ui.js';
 import { BOOK } from './content/index.js';
 import * as P from './progress.js';
 import { validPin } from './accounts.js';
+import { minutesText } from './screen-time.js';
 
 // Children's PINs: 4 numbers on a shared device, 4–8 numbers for accounts.
 const validAccountPin = (pin) => /^\d{4,8}$/.test(String(pin));
@@ -533,6 +534,7 @@ export function familyPages(ctx) {
     const actions = cloud
       ? [
         h('button', { type: 'button', class: 'btn small primary', onclick: () => go(`#/parent/child/${child.id}`) }, '📊 Progress'),
+        h('button', { type: 'button', class: 'btn small ghost', onclick: () => timeDialog(child) }, '⏱ Time'),
         h('button', {
           type: 'button', class: 'btn small danger',
           onclick: async () => {
@@ -584,7 +586,118 @@ export function familyPages(ctx) {
         stat('✅', `${s.done}/${s.total}`, 'activities'),
         stat('📝', s.reviewPercent == null ? '–' : `${s.reviewPercent}%`, 'reviews'),
         stat('📖', unitLabel, 'working on')),
+      cloud ? timeLine(child) : null,
       h('div', { class: 'controls left' }, actions));
+  }
+
+  // ------------------------------------------------------------ screen time
+  function timeLine(child) {
+    const t = family.childTime(child.id);
+    const used = `${Math.floor(t.usedSeconds / 60)} min`;
+    if (!t.limit) return h('p', { class: 'time-line small' }, `⏱ Today: ${used} · no daily limit`);
+    const total = t.limit + t.extraMinutes;
+    const left = Math.max(0, total * 60 - t.usedSeconds);
+    return h('p', { class: `time-line small ${left ? '' : 'up'}` },
+      `⏱ Today: ${used} of ${t.limit} min`, t.extraMinutes ? ` + ${t.extraMinutes} extra` : '',
+      left ? ` · ${Math.ceil(left / 60)} min left` : ' · time is up');
+  }
+
+  const minutesField = (label, value = '') => field({
+    type: 'number', inputmode: 'numeric', min: '1', max: '600', step: '1', value: String(value), 'aria-label': label, placeholder: 'minutes', class: 'write-input minutes-input',
+  });
+  const readMinutes = (input) => {
+    const n = Number(input.value);
+    return Number.isInteger(n) && n >= 1 && n <= 600 ? n : null;
+  };
+
+  function timeDialog(child) {
+    const t = family.childTime(child.id);
+    const limitInput = minutesField('Daily limit in minutes', t.limit || 60);
+    const noLimit = h('input', { type: 'checkbox', 'aria-label': 'No daily limit', checked: !t.limit });
+    limitInput.disabled = !t.limit;
+    noLimit.addEventListener('change', () => { limitInput.disabled = noLimit.checked; });
+    const addInput = minutesField('Minutes to add today');
+    const status = formStatus();
+    const done = (msg) => { toast(msg, 'good'); dialog.close(); };
+    const dialog = h('dialog', { class: 'modal time-modal' },
+      h('h2', {}, `⏱ ${child.name}'s time`),
+      timeLine(child),
+      h('form', {
+        class: 'auth-form', novalidate: true,
+        onsubmit: async (e) => {
+          e.preventDefault();
+          const minutes = noLimit.checked ? 0 : readMinutes(limitInput);
+          if (minutes == null) { status.textContent = 'Please type a number of minutes from 1 to 600.'; return; }
+          try {
+            await family.setDailyLimit(child.id, minutes);
+            done(minutes ? `${child.name}'s daily limit is now ${minutes} minutes.` : `${child.name} has no daily limit now.`);
+          } catch (err) { status.textContent = family.errorMessage(err); }
+        },
+      }, h('h3', {}, 'Daily limit'),
+      h('div', { class: 'minutes-row' }, limitInput, h('span', {}, 'minutes a day')),
+      h('label', { class: 'tick-row' }, noLimit, ' No limit'),
+      h('button', { type: 'submit', class: 'btn primary' }, 'Save limit')),
+      h('form', {
+        class: 'auth-form', novalidate: true,
+        onsubmit: async (e) => {
+          e.preventDefault();
+          const minutes = readMinutes(addInput);
+          if (minutes == null) { status.textContent = 'Please type a number of minutes from 1 to 600.'; return; }
+          try {
+            await family.addTimeFor(child.id, minutes);
+            done(`Added ${minutesText(minutes * 60)} for ${child.name} today.`);
+          } catch (err) { status.textContent = family.errorMessage(err); }
+        },
+      }, h('h3', {}, 'Extra time today'),
+      h('div', { class: 'minutes-row' }, addInput, h('span', {}, 'minutes')),
+      h('button', { type: 'submit', class: 'btn good' }, '➕ Add time')),
+      status,
+      h('div', { class: 'controls' }, h('button', { type: 'button', class: 'btn ghost', onclick: () => dialog.close() }, 'Close')));
+    dialog.addEventListener('close', () => dialog.remove());
+    add(document.body, dialog);
+    dialog.showModal();
+  }
+
+  // A child's time is used up for today.
+  function timeUpPage() {
+    renderHeader();
+    const p = store.profile();
+    const t = family.screenTime();
+    add(main, h('section', { class: 'card center time-up' },
+      img(p?.avatar || 'sam', { cls: 'avatar big' }),
+      h('h2', {}, '⏰ Time’s up for today!'),
+      h('p', {}, `You used your ${minutesText((t.limitMinutes + t.extraMinutes) * 60)} today. Well done, ${p?.name || ''}! See you tomorrow.`),
+      h('p', { class: 'small muted' }, 'Your work is saved. Your parent can give you more time.'),
+      h('button', { type: 'button', class: 'btn ghost', onclick: grownUpAddTime }, '👪 Grown-up: add time')));
+  }
+
+  function grownUpAddTime() {
+    const pw = field({ type: 'password', autocomplete: 'current-password', 'aria-label': 'Parent password', placeholder: 'Parent password' });
+    const minutes = minutesField('Minutes to add today', 15);
+    const status = formStatus();
+    const dialog = h('dialog', { class: 'modal' },
+      h('h2', {}, '👪 Add time for today'),
+      h('form', {
+        class: 'auth-form', novalidate: true,
+        onsubmit: async (e) => {
+          e.preventDefault();
+          const n = readMinutes(minutes);
+          if (n == null) { status.textContent = 'Please type a number of minutes from 1 to 600.'; return; }
+          if (!(await family.checkParent(pw.value))) { pw.value = ''; status.textContent = 'That password is not right.'; pw.focus(); return; }
+          try {
+            await family.addMyTime(n);
+            dialog.close();
+            toast(`${minutesText(n * 60)} added.`, 'good');
+          } catch (err) { status.textContent = family.errorMessage(err); }
+        },
+      }, pw, h('div', { class: 'minutes-row' }, minutes, h('span', {}, 'minutes')), status,
+      h('div', { class: 'controls' },
+        h('button', { type: 'button', class: 'btn ghost', onclick: () => dialog.close() }, 'Cancel'),
+        h('button', { type: 'submit', class: 'btn primary' }, 'Add time'))));
+    dialog.addEventListener('close', () => dialog.remove());
+    add(document.body, dialog);
+    dialog.showModal();
+    pw.focus();
   }
 
   function stat(icon, value, label) {
@@ -857,7 +970,7 @@ export function familyPages(ctx) {
   }
 
   return {
-    loadingPage, accountProblemPage, welcomePage, pickerPage, parentPage, childProgressPage, scoreboardPage, tracker,
+    loadingPage, accountProblemPage, timeUpPage, welcomePage, pickerPage, parentPage, childProgressPage, scoreboardPage, tracker,
     kidFamilyCard, kidPictureCard,
   };
 }

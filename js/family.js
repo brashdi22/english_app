@@ -15,6 +15,7 @@ import * as cloud from './cloud.js';
 import { computeSummary, summaryFor } from './progress.js';
 import { checkParentPassword, hashParentPassword, hashPin, checkPin, DEFAULT_PARENT_PASSWORD } from './accounts.js';
 import { newProfileId, DEFAULT_SETTINGS } from './storage.js';
+import { createScreenTimeTracker, limitOf, dayKey } from './screen-time.js';
 
 const SEND_DELAY_MS = 800;
 const SUMMARY_DELAY_MS = 2500;
@@ -37,6 +38,9 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
   let wipeKey = null; // this device's copy of a deleted account, removed on log-out
   let creating = 0; // sign-ups in progress (their details are being saved)
   let missingWhileCreating = false;
+  let tracker = null; // a child's screen time on this device (family members)
+  const usageWatches = new Map(); // parent: kidUid → { day, usage, unsub }
+  let usageDayTimer = null;
   let authKnown = mode === 'local';
   let accountLoaded = mode === 'local';
   let unsubs = [];
@@ -173,6 +177,7 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
   function stopFamily() {
     familyUnsubs.forEach((u) => u());
     familyUnsubs = [];
+    stopScreenTime();
     familySettings = null;
     members = [];
     requests = [];
@@ -222,6 +227,7 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
       familyUnsubs.push(await cloud.watchMembers(code, (list) => {
         members = list;
         syncMemberProfiles();
+        syncUsageWatches();
         membershipKnown = true;
         update();
       }));
@@ -232,6 +238,8 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
         myMember = m;
         membershipKnown = true;
         if (m) watchAsMember(code);
+        if (m) startScreenTime(uid);
+        else stopScreenTime();
         if (joinedNow) sendSummary();
         update();
       }));
@@ -248,6 +256,72 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
     familyUnsubs.push(await cloud.watchFamilySettings(code, (s) => { familySettings = s; update(); }));
     familyUnsubs.push(await cloud.watchMembers(code, (list) => { members = list; update(); }));
   }
+
+  // ---------------------------------------------------------- screen time
+  function startScreenTime(uid) {
+    if (tracker) return;
+    tracker = createScreenTimeTracker({
+      watchUsage: (day, cb) => cloud.watchUsage(uid, day, cb),
+      addSeconds: (day, n) => cloud.addUsageSeconds(uid, day, n),
+      getLimit: () => limitOf(myMember),
+      onChange: update,
+    });
+    tracker.start();
+  }
+
+  function stopScreenTime() {
+    tracker?.stop();
+    tracker = null;
+    usageWatches.forEach((w) => w.unsub?.());
+    usageWatches.clear();
+    clearInterval(usageDayTimer);
+    usageDayTimer = null;
+  }
+
+  // A child's time today: { limited, timeUp, remainingSeconds, ... }.
+  function screenTime() {
+    return tracker && account?.role === 'kid' ? tracker.state() : { limited: false, timeUp: false, remainingSeconds: Infinity };
+  }
+
+  // Extra minutes for today, given on the child's device (grown-up password).
+  async function addMyTime(minutes) {
+    if (!tracker) return;
+    await cloud.addExtraMinutes(account.uid, tracker.day || dayKey(), minutes);
+  }
+
+  // Parent: today's time of each member.
+  function syncUsageWatches() {
+    const today = dayKey();
+    const ids = new Set(members.map((m) => m.uid));
+    for (const [uid, w] of usageWatches) {
+      if (!ids.has(uid) || w.day !== today) { w.unsub?.(); usageWatches.delete(uid); }
+    }
+    for (const uid of ids) {
+      if (usageWatches.has(uid)) continue;
+      const w = { day: today, usage: null, unsub: null };
+      usageWatches.set(uid, w);
+      // Refused just after a child is accepted (not saved on the server yet):
+      // try again shortly.
+      const retry = () => {
+        if (usageWatches.get(uid) !== w) return;
+        usageWatches.delete(uid);
+        setTimeout(() => { if (account?.role === 'parent') syncUsageWatches(); }, 3000);
+      };
+      cloud.watchUsage(uid, today, (u) => { w.usage = u; update(); }, retry)
+        .then((fn) => { if (usageWatches.get(uid) === w) w.unsub = fn; else fn(); }, warn);
+    }
+    usageDayTimer ||= setInterval(() => { if ([...usageWatches.values()].some((w) => w.day !== dayKey())) { syncUsageWatches(); update(); } }, 60000);
+  }
+
+  // Parent: { limit, usedSeconds, extraMinutes } of a member today.
+  function childTime(kidUid) {
+    const m = members.find((x) => x.uid === kidUid);
+    const u = usageWatches.get(kidUid)?.usage;
+    return { limit: limitOf(m), usedSeconds: u?.seconds || 0, extraMinutes: u?.extraMinutes || 0 };
+  }
+
+  const setDailyLimit = (kidUid, minutes) => cloud.setDailyLimit(familyCode(), kidUid, minutes);
+  const addTimeFor = (kidUid, minutes) => cloud.addExtraMinutes(kidUid, dayKey(), minutes);
 
   // The parent's copy holds one profile per member, for the dashboard.
   function syncMemberProfiles() {
@@ -317,6 +391,7 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
     clearTimeout(sendTimer);
     sendOutbox();
     if (summaryTimer) sendSummary();
+    tracker?.flush();
   }
 
   // --------------------------------------------------------- child accounts
@@ -422,6 +497,7 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
 
   async function signOut() {
     flush();
+    stopScreenTime();
     store.selectProfile(null);
     store.flush();
     await cloud.signOut();
@@ -511,6 +587,8 @@ export function createFamily(store, { onUpdate = () => {}, storage = globalThis.
     // parent accounts
     signUpParent, signInParent, acceptRequest, rejectRequest, removeMember, watchProgress,
     deleteChildAccount, deleteParentAccount,
+    // screen time
+    screenTime, addMyTime, childTime, setDailyLimit, addTimeFor,
     signOut, resetPassword: (email) => cloud.resetPassword(email),
     errorMessage: cloud.errorMessage,
     validUsername: cloud.validUsername,

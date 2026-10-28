@@ -283,6 +283,7 @@ function memberFromDoc(d) {
     username: data.username,
     avatar: data.avatar,
     joinedAt: data.joinedAt,
+    dailyLimit: Number.isFinite(data.dailyLimit) ? data.dailyLimit : null,
     summary: data.summary ? JSON.parse(data.summary) : null,
   };
 }
@@ -307,6 +308,12 @@ export async function saveMemberSummary(code, kidUid, { summary, username, avata
   await fb.updateDoc(ref(fb, db, `families/${code}/members/${kidUid}`), data);
 }
 
+// A child's daily screen-time limit in minutes (0 = no limit).
+export async function setDailyLimit(code, kidUid, minutes) {
+  const { fb, db } = await init();
+  await fb.updateDoc(ref(fb, db, `families/${code}/members/${kidUid}`), { dailyLimit: minutes });
+}
+
 export async function removeMember(code, kidUid) {
   const { fb, db } = await init();
   await fb.deleteDoc(ref(fb, db, `families/${code}/members/${kidUid}`));
@@ -317,10 +324,14 @@ export async function removeMember(code, kidUid) {
 // their place in the family. deleted/{kidUid} marks the login as deleted.
 export async function deleteKidAccount(code, kidUid) {
   const { fb, db } = await init();
-  const progress = await fb.getDocs(col(fb, db, `users/${kidUid}/progress`));
-  for (let i = 0; i < progress.docs.length; i += 400) {
+  const [progress, usage] = await Promise.all([
+    fb.getDocs(col(fb, db, `users/${kidUid}/progress`)),
+    fb.getDocs(col(fb, db, `users/${kidUid}/usage`)),
+  ]);
+  const docs = [...progress.docs, ...usage.docs];
+  for (let i = 0; i < docs.length; i += 400) {
     const batch = fb.writeBatch(db);
-    progress.docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
+    docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
     await batch.commit();
   }
   // One batch: the rules check the parent against the family as it was before.
@@ -359,6 +370,26 @@ export async function deleteFamily(code) {
 export async function deleteUserDoc(uid) {
   const { fb, db } = await init();
   await fb.deleteDoc(ref(fb, db, `users/${uid}`));
+}
+
+// ----------------------------------------------------------- screen time
+// users/{kidUid}/usage/{day}: { seconds used, extraMinutes given that day }
+export async function watchUsage(kidUid, day, callback, onError = () => callback(null)) {
+  const { fb, db } = await init();
+  return fb.onSnapshot(ref(fb, db, `users/${kidUid}/usage/${day}`),
+    (snap) => callback(snap.exists() ? snap.data() : null), onError);
+}
+
+export async function addUsageSeconds(kidUid, day, seconds) {
+  const { fb, db } = await init();
+  await fb.setDoc(ref(fb, db, `users/${kidUid}/usage/${day}`),
+    { seconds: fb.increment(seconds), updatedAt: new Date().toISOString() }, { merge: true });
+}
+
+export async function addExtraMinutes(kidUid, day, minutes) {
+  const { fb, db } = await init();
+  await fb.setDoc(ref(fb, db, `users/${kidUid}/usage/${day}`),
+    { extraMinutes: fb.increment(minutes), updatedAt: new Date().toISOString() }, { merge: true });
 }
 
 // --------------------------------------------------------------- progress

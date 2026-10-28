@@ -166,3 +166,26 @@ test("nobody can take over someone else's family", async () => {
   await assertFails(updateDoc(doc(as('otherdad'), `families/${CODE}`), { parentUid: 'otherdad' }));
   await assertFails(updateDoc(doc(as('mum'), `families/${CODE}`), { parentUid: 'huda' }));
 });
+
+test('screen time: the child adds seconds (never fewer); the parent adds extra minutes', async () => {
+  const day = 'users/huda/usage/2026-10-28';
+  await assertSucceeds(setDoc(doc(as('huda'), day), { seconds: 60, updatedAt: 'now' }));
+  await assertSucceeds(updateDoc(doc(as('huda'), day), { seconds: 120 }));
+  await assertFails(updateDoc(doc(as('huda'), day), { seconds: 10 }));
+  await assertFails(updateDoc(doc(as('huda'), day), { cheat: true }));
+  await assertSucceeds(updateDoc(doc(as('huda'), day), { extraMinutes: 15 })); // grown-up on her tablet
+  await assertSucceeds(getDoc(doc(as('mum'), day)));
+  await assertSucceeds(updateDoc(doc(as('mum'), day), { extraMinutes: 30, updatedAt: 'later' }));
+  await assertFails(updateDoc(doc(as('mum'), day), { seconds: 0 }));
+  await assertSucceeds(setDoc(doc(as('mum'), 'users/huda/usage/2026-10-29'), { extraMinutes: 20, updatedAt: 'now' }));
+  await assertFails(setDoc(doc(as('mum'), 'users/huda/usage/2026-10-30'), { seconds: 5 }));
+  await assertFails(getDoc(doc(as('otherdad'), day)));
+  await assertFails(setDoc(doc(as('otherdad'), 'users/huda/usage/2026-10-31'), { extraMinutes: 99 }));
+  await assertFails(setDoc(doc(as('mum'), 'users/omar/usage/2026-10-28'), { extraMinutes: 99 })); // not a member yet
+  await assertFails(getDoc(doc(as('zara'), day)));
+});
+
+test('only the parent sets a child’s daily limit', async () => {
+  await assertSucceeds(updateDoc(doc(as('mum'), `families/${CODE}/members/huda`), { dailyLimit: 45 }));
+  await assertFails(updateDoc(doc(as('huda'), `families/${CODE}/members/huda`), { dailyLimit: 0 }));
+});

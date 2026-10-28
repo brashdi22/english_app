@@ -8,6 +8,7 @@ rules_version = '2';
 //     the child has joined (accepted member) can read it.
 //   - a child cannot leave a family: while they are a member, their
 //     familyCode cannot change. Only the parent removes them.
+//   - users/{kidUid}/usage/{day}: screen time used and extra minutes given.
 //   - only the parent can delete a member's account; deleted/{kidUid} then
 //     stops the login from making a new account (the child's device deletes
 //     the login the next time it is used).
@@ -73,6 +74,21 @@ service cloud.firestore {
       match /progress/{activityId} {
         allow read: if signedIn() && (request.auth.uid == uid || isParentOf(uid));
         allow write: if signedIn() && request.auth.uid == uid;
+        allow delete: if isParentOf(uid);
+      }
+
+      // Screen time per day: the child's devices add the seconds used (the
+      // total can only go up); the parent, or a grown-up on the child's
+      // device, adds extra minutes.
+      match /usage/{day} {
+        allow read: if signedIn() && (request.auth.uid == uid || isParentOf(uid));
+        allow create: if signedIn() && (
+          (request.auth.uid == uid && request.resource.data.keys().hasOnly(['seconds', 'extraMinutes', 'updatedAt']))
+          || (isParentOf(uid) && request.resource.data.keys().hasOnly(['extraMinutes', 'updatedAt'])));
+        allow update: if signedIn() && (
+          (request.auth.uid == uid && request.resource.data.keys().hasOnly(['seconds', 'extraMinutes', 'updatedAt'])
+            && request.resource.data.get('seconds', 0) >= resource.data.get('seconds', 0))
+          || (isParentOf(uid) && onlyChanges(['extraMinutes', 'updatedAt'])));
         allow delete: if isParentOf(uid);
       }
     }

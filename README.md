@@ -77,6 +77,18 @@ The app works in one of two ways.
 - **🏆 Scoreboard:** the children of the family compare stars (all time and
   this week), activities done, units finished, review scores, reading speed
   and words said. Only members of the same family see each other.
+- **Daily time limit:** each child in a family has **60 minutes a day**
+  at first. In the parent area, **⏱ Time** on a child's card sets their
+  limit (any number of minutes, or no limit) and **adds extra time for
+  today** — from the parent's own phone or computer, it reaches the child's
+  devices straight away. On the child's device a grown-up can also add time
+  with the grown-up password. Only time with the app on screen and in use
+  counts (not after 3 minutes without a tap), on all the child's devices
+  together; the top bar shows the minutes left, with a warning at 5
+  minutes, and then **"Time's up for today"**. The day starts at midnight on
+  the device. The count runs on the child's device, so it is a firm limit
+  for children, not tamper-proof (e.g. against changing the device's date).
+  Children who are not in a family have no limit.
 - **Grown-up scoring** (letter sounds, writing, talking): on a child's
   device, tap **🔒 Grown-up** and type the family's **grown-up password**.
   It starts as **`adminpass`**; the parent can change it in the parent area
@@ -194,6 +206,7 @@ js/family.js       accounts, families, join requests, grown-up password, syncing
 js/family-pages.js log-in and sign-up pages, PIN pad, parent area, scoreboard
 js/cloud.js        Firebase (accounts) — settings in js/cloud-config.js
 js/progress.js     scores and summaries for the tracker and scoreboard
+js/screen-time.js  daily time limit: counting a child's time on all devices
 js/accounts.js     password and PIN hashing
 js/runner.js       question-card exercises (checking, retries, scoring)
 js/screens.js      words, stories, dialogues, pronunciation, writing, grown-up scoring

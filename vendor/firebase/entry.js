@@ -6,5 +6,5 @@ export {
 } from 'firebase/auth';
 export {
   initializeFirestore, connectFirestoreEmulator, persistentLocalCache, persistentMultipleTabManager, memoryLocalCache,
-  doc, collection, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, writeBatch, serverTimestamp,
+  doc, collection, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, writeBatch, serverTimestamp, increment,
 } from 'firebase/firestore';
